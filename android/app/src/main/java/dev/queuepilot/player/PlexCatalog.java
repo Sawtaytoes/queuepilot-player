@@ -108,6 +108,7 @@ final class PlexCatalog {
           String key = attribute(parser, "ratingKey");
           String directoryKey = attribute(parser, "key");
           String type = attribute(parser, "type");
+          String libraryType = type;
           if (key.isEmpty()) {
             key = directoryKey;
             if (!directoryKey.startsWith("/")) type = "library";
@@ -126,6 +127,7 @@ final class PlexCatalog {
                   .put("key", key)
                   .put("title", attribute(parser, "title"))
                   .put("type", type)
+                  .put("libraryType", libraryType)
                   .put("thumb", attribute(parser, "thumb"))
                   .put("children", children)
                   .put("part", "")

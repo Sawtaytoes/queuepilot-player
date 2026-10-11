@@ -12,7 +12,11 @@ Use Google Android SDK and Media3 for the Android harness. Vet every new depende
 provenance under the workspace software-origin preference. Plezy is a reference checkout,
 not an adopted dependency. Roku needs a separate BrightScript/SceneGraph client.
 
-The Android app is a diagnostic harness until a TV design is selected. Do not claim native
+The approved Android TV presentation is queue-first: a left rail, compact queue cards,
+continuation, and artwork browsing below. The actual native UI must match the reviewed
+presentation; a diagnostic screen is not a substitute. Keep inputs and dialogs bounded,
+never screen-wide. Plex onboarding uses device-link authorization, Home profiles, and
+automatic server discovery; do not expose token entry to viewers. Do not claim native
 4K UI, verified offline Plex Home switching, faithful ASS rendering, native QueuePilot
 starts, tone-mapping quality, or passthrough without actual device evidence.
 

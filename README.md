@@ -1,70 +1,62 @@
-# QueuePilot Player
+# QueuePilot TV
 
-An experimental Android TV playback harness for testing a QueuePilot player without
-controlling another app through ADB. The APK runs its own Media3 player. The finished
-TV interface and native QueuePilot session integration are separate next steps.
+A native Android TV preview with a queue-first home screen, Plex device-link sign-in,
+profile selection, artwork browsing, and a Media3 player. It uses the existing
+`dev.queuepilot.player.prototype` application ID and updates QueuePilot Lab in place.
 
-## What the first APK can test
+## Connect your library
 
-- Enroll explicit Plex profile tokens against a server origin, with credentials encrypted
-  using Android Keystore. Switch among enrolled profiles without a cloud lookup.
-- Browse Plex libraries, shows, seasons, and episodes. Listings cached by profile and
-  server remain available when the origin request fails.
-- Request 720-pixel artwork for the listing and compare 240-pixel and 1440-pixel requests
-  side by side. The comparison SurfaceView requests a 3840 × 2160 buffer and reports
-  the dimensions received. This is not proof that every UI element or final HDMI frame
-  renders natively in 4K.
-- Play the first media part directly with Media3, display decoded video dimensions, and
-  open title cast metadata while video continues.
-- Read the existing QueuePilot queue registry. This is read-only: native queue starts
-  need the session contract in [Native sessions](docs/native-sessions.md).
-- Exercise a fictional Episode 9 → OVA → Episode 10 sequence with persistent, isolated
-  profile progress and unchanged provider identity.
+Choose **Sign in with Plex**, open **plex.tv/link** on a phone or computer, and enter the
+four-character code displayed on the TV. The app then shows Plex Home profiles and discovers
+their servers. A single available server connects automatically; multiple servers appear as
+cards. Protected profiles use their existing Plex Home PIN. No API token, profile name, or
+Plex server address needs to be entered on the television.
 
-The app is labeled **QueuePilot Lab**, uses the distinct application ID
-`dev.queuepilot.player.prototype`, and requires Android 11 or newer. It is a diagnostic
-screen, not the proposed final interface.
+The home screen follows the approved queue-first presentation: a left navigation rail,
+queue cards at the top, continuation below, and library browsing. D-pad focus outlines the
+selected card. Back returns to the preceding screen. Plex libraries use artwork cards,
+and configuration dialogs use bounded widths. **Explore the demo** opens a fictional
+catalog for reviewing the same native layout without an account.
 
-[Prototype validation and screenshots](docs/verification.md) record the tested APK and
-its limits.
+Credentials and the profile roster are encrypted with Android Keystore. Previously connected
+unprotected profiles can use their saved server credentials and catalog cache without a
+Plex cloud lookup. Protected-profile switching currently requires an online PIN check.
+An unreachable server still cannot stream media, and cached tokens cannot renew themselves.
+Account credentials go only to Plex; discovered server credentials go only to direct server
+connections. Redirects and relays are refused, and cleartext server connections are limited
+to local private IP addresses.
 
-## Limits of this build
+## Playback and current limits
 
-Plex enrollment uses a supplied token; Plex PIN login and automatic Plex Home enrollment
-are not implemented. A name does not change a token's access rights. An owner token still
-grants owner access. Offline profile selection cannot renew an expired token, create a new
-login, or make an unreachable media server playable. Catalog cache storage is disposable;
-artwork and media downloads are not cached yet.
+The player opens supported files directly with Media3, reports decoded video dimensions,
+and offers a Cast overlay. Artwork cards request a 720-pixel derivative; title artwork
+requests 1440 pixels. The detail screen can compare actual 240px and 1440px responses.
+The interface does not claim native 4K composition on every Android TV device.
 
-Playback uses the first part and the platform/Media3 decoder path. It does not negotiate
-server transcoding, import ordering manifests, update Plex watch history, or launch an
-actual QueuePilot queue. Full libass styling, attached fonts, the large-subtitle regression,
-HDR conversion, Dolby Vision, and audio passthrough need explicit device tests before
-claiming support. Do not select this as the family player's default yet.
+QueuePilot registry browsing is available after connecting a QueuePilot server in Settings.
+**Native queue starts remain unfinished.** Queue cards explain that state instead of sending
+`/api/play`, which controls external players. The proposed integration uses the existing
+engine's selection and history rules; see [native sessions](docs/native-sessions.md).
 
-Only the first 40 results of a listing are shown to keep this harness bounded. Paging,
-search, edition selection, collection composition, and production navigation are future UI
-work. The demo sequence is a separate model test and does not rearrange real Plex items.
+This preview does not negotiate transcoding, report Plex watch history, import real story
+ordering manifests, or download media. Faithful ASS rendering, attached fonts, large
+subtitles, HDR conversion, Dolby Vision, and passthrough still need explicit device evidence.
+Library grids request pages of 30 items. Demo Episode 9 → OVA → Episode 10 ordering and
+progress remain separate from real Plex items. Use this for testing rather than the family
+player's default viewing sessions.
 
 ## Build and test
 
-The toolchain image uses the official Eclipse Temurin base, Google Android SDK, Android
-TV API 30 image, Gradle 8.13, Android Gradle Plugin 8.13.2, and Google Media3 1.11.1. Build
-the image on a Linux host with Docker; the emulator also requires usable `/dev/kvm`.
-
-```sh
-docker build -t queuepilot-player-build:0.1 tools
-```
-
-Run `tools/build.sh` with absolute paths for the checkout and a persistent machine-local
-cache. The cache preserves the debug signing key, so successive test APKs can update an
-existing prototype installation. This is a development key, not a production release key.
+The toolchain uses official Eclipse Temurin, Google Android SDK, Android TV API 30,
+Gradle 8.13, AGP 8.13.2, and Google Media3 1.11.1. The app requires Android 11 or newer.
+Build the Docker toolchain with `docker build -t queuepilot-player-build:0.1 tools`.
 
 ```sh
 ./tools/build.sh /absolute/path/to/queuepilot-player /absolute/path/to/build-cache
 ```
 
-The default command runs unit tests, Android lint, and `assembleDebug`. The APK is under
+The build runs unit tests, lint, and `assembleDebug`. Preserve the cache's `android`
+directory so test updates retain their signing key. The APK is
 `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ```sh
@@ -72,25 +64,15 @@ adb install -r android/app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n dev.queuepilot.player.prototype/dev.queuepilot.player.MainActivity
 ```
 
-ADB is a deployment and testing tool; playback has no runtime ADB dependency.
+ADB is only a deployment/testing tool. The app performs its own authentication and playback.
+The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
+discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
+refuses physical-device targets, and accepts fixture routing only on an emulator.
+See [test environment](docs/testing.md) and [verification](docs/verification.md).
 
-The emulator script runs headlessly and publishes no network port. Use a disposable
-container with `/dev/kvm`, the source mounted at `/source`, and the cache mounted at
-`/cache`. `tools/smoke.py` must only target that emulator: it clears the prototype's data
-and uses invented credentials. The fixture server and generator provide catalog, artwork,
-and real video data. See [Test environment](docs/testing.md).
+## Foundation
 
-## Client foundation and Roku
-
-This is independent Java/Android code, not a Plezy fork. Plezy remains a useful reference
-for Plex/Jellyfin adapters and player behavior, pending its full dependency provenance
-review. Its presentation is not a required design constraint.
-
-Roku needs a separate BrightScript/SceneGraph client; this APK cannot run there. The
-shared assets will be the provider-neutral viewing sequence, QueuePilot session contract,
-fixture data, and behavioral tests. See [Roku evaluation](docs/roku.md).
-
-The preferred conversion location depends on the client: preserve direct playback and
-on-device conversion for a capable Shield; negotiate GPU transcoding and HDR-to-SDR
-conversion with Plex/Jellyfin for clients that require it. This harness proves neither
-conversion quality nor the final family-device compatibility matrix.
+This is independent Java/Android code, not a Plezy fork. Plezy is a reference for the Plex
+protocol, pending its dependency provenance review. The standard Plex authorization flow
+does not require adopting Plezy. Roku needs a separate BrightScript/SceneGraph client;
+see [Roku evaluation](docs/roku.md).

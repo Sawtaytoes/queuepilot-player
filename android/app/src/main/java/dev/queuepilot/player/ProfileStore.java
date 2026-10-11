@@ -12,7 +12,7 @@ import javax.crypto.spec.GCMParameterSpec;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Explicit enrollment only. The token and endpoint roster is encrypted with Android Keystore. */
+/** Tokens and the account/profile roster are encrypted with Android Keystore. */
 final class ProfileStore {
   private static final String ALIAS = "queuepilot-profile-secrets-v1";
   private final Context context;
@@ -40,9 +40,21 @@ final class ProfileStore {
   }
 
   JSONArray read() throws Exception {
+    return new JSONArray(readSecret("profiles", "[]"));
+  }
+
+  JSONObject account() throws Exception {
+    return new JSONObject(readSecret("account", "{}"));
+  }
+
+  void account(JSONObject account) throws Exception {
+    writeSecret("account", account.toString());
+  }
+
+  private String readSecret(String name, String fallback) throws Exception {
     String value =
-        context.getSharedPreferences("secrets", Context.MODE_PRIVATE).getString("profiles", "");
-    if (value.isEmpty()) return new JSONArray();
+        context.getSharedPreferences("secrets", Context.MODE_PRIVATE).getString(name, "");
+    if (value.isEmpty()) return fallback;
     JSONObject envelope = new JSONObject(value);
     Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
     cipher.init(
@@ -50,14 +62,17 @@ final class ProfileStore {
         key(),
         new GCMParameterSpec(128, Base64.decode(envelope.getString("iv"), Base64.NO_WRAP)));
     byte[] plain = cipher.doFinal(Base64.decode(envelope.getString("ciphertext"), Base64.NO_WRAP));
-    return new JSONArray(new String(plain, java.nio.charset.StandardCharsets.UTF_8));
+    return new String(plain, java.nio.charset.StandardCharsets.UTF_8);
   }
 
   void write(JSONArray profiles) throws Exception {
+    writeSecret("profiles", profiles.toString());
+  }
+
+  private void writeSecret(String name, String value) throws Exception {
     Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
     cipher.init(Cipher.ENCRYPT_MODE, key());
-    byte[] ciphertext =
-        cipher.doFinal(profiles.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    byte[] ciphertext = cipher.doFinal(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     JSONObject envelope =
         new JSONObject()
             .put("iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
@@ -65,7 +80,7 @@ final class ProfileStore {
     if (!context
         .getSharedPreferences("secrets", Context.MODE_PRIVATE)
         .edit()
-        .putString("profiles", envelope.toString())
+        .putString(name, envelope.toString())
         .commit()) throw new IllegalStateException("Profile storage failed");
   }
 }

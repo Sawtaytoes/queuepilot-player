@@ -8,10 +8,11 @@ ignored, and never added to Git.
 
 The Android TV API 30 image needs explicit TV hardware dimensions. `emulator.sh` writes
 1920 × 1080 and landscape orientation before boot, starts the ADB server first, and resets
-logical overrides. The caller must persist `/root/.android` for both build and emulator
-jobs, so debug signatures and ADB authorization survive container replacement.
+logical overrides. The build job must persist `/root/.android` to keep the APK signing key. Give each
+emulator its own persistent `.android` and AVD cache, so concurrent jobs do not share
+emulator registration files or locks.
 
-The emulator script wipes its own AVD on startup. Use this only for the disposable
+The emulator script uses a disposable read-only AVD session and wipes its guest data on startup. Use this only for the disposable
 `queuepilot-tv` AVD. A test clears the prototype's application data, never another package.
 
 ## Generate synthetic fixtures
@@ -32,9 +33,10 @@ responses, and a QueuePilot-shaped registry. Its request history deliberately om
 
 Start an emulator container with the following mounts and settings:
 
-- `--device /dev/kvm`, four CPUs, and a 6 GiB memory limit.
+- `--device /dev/kvm`, six CPUs, and a 10 GiB memory limit. The software renderer exceeded a 6 GiB
+  container limit during repeated playback tests; guest RAM alone is not the process budget.
 - The checkout at `/source` and persistent toolchain cache at `/cache`.
-- The cache's `android` directory at `/root/.android`.
+- The emulator cache's own `android` directory at `/root/.android` (separate from the build signing cache).
 - Generated fixture files at `/fixtures`.
 - The image command `/source/tools/emulator.sh` and no published ports.
 
@@ -44,6 +46,7 @@ same container, then the smoke test:
 ```sh
 docker exec -d queuepilot-player-emulator python3 /source/tools/fixture_server.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/layout_smoke.py
 ```
 
 The guest reaches the container's fixture server through the emulator's standard
@@ -51,10 +54,24 @@ The guest reaches the container's fixture server through the emulator's standard
 The server outage is an origin failure, not an assertion that a physical Plex Home
 profile can renew authentication without internet.
 
-The checks cover profile enrollment, encrypted credential storage, profile-scoped
-catalog requests and caches, artwork request dimensions, real direct playback, cast,
-process restart, and demo viewing-order isolation. The browser design preview has its
+The checks cover code-based Plex sign-in, cancellation and expiry, incorrect/protected
+profile PIN handling, automatic server discovery, encrypted credentials, server-token
+separation, cached profiles/catalogs, direct playback, cast, Back/D-pad navigation, and
+demo story-order persistence. The test explicitly refuses physical devices. Its `fixture`
+launch extra only changes networking on an Android emulator. The browser design preview has its
 own four-window-plus-4K checks in the private project notes.
+
+The layout check captures the emulator’s physical display, verifies PNG dimensions, and
+checks remote focus and artwork browsing. Run it after the functional smoke test, never
+concurrently. For a separate 4K run, restart the disposable container with
+`-e TV_WIDTH=3840 -e TV_HEIGHT=2160 -e TV_DENSITY=480` and a 16 GiB memory limit,
+then run `tools/layout_smoke.py` again. This experiment currently fails the strict
+resolution assertion: the API 30 TV window surface remains 1080p despite reporting the
+4K physical mode. It is an unresolved experiment, not a passing release check. Merely
+changing `wm size` is also insufficient. The default boot is 1080p.
+
+`tools/layout_smoke.py --density-320` checks 1080p at density 320 as a separate TV scale;
+it changes only the disposable emulator. Default 1080p uses density 240.
 
 Stop the disposable container when testing ends. Recreate it from the canonical checkout
 for another run; do not keep a running process bound to a worktree that will be removed.
