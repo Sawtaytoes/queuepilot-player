@@ -1331,7 +1331,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(
                     PlexDataSource.factory(
-                        playingOrigin.isEmpty() ? server() : playingOrigin, secret), ass.extractors()))
+                        playingOrigin.isEmpty() ? server() : playingOrigin, secret),
+                    ass.extractors()))
             .build();
     mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);

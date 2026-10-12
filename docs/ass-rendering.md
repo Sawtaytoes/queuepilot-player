@@ -11,7 +11,9 @@ Embedded fonts, style outlines, positioned signs, vector drawings and animation 
 interpreted by libass. Other subtitle formats retain Media3's existing path. ASS in
 other containers and external ASS downloads are not covered by this integration.
 
-Track changes and seeks replace the libass track and invalidate stale output. Subtitle
+Track changes replace the libass track. Seeks invalidate stale output and pending
+packets while retaining decoded events, so a long sign can survive a seek inside
+its duration; libass handles the playback clock moving backwards. Subtitle
 Off releases the renderer's track and clears the overlay. Font data is scoped to one
 playback session, not installed globally. Attachments are limited to 128 fonts,
 16 MiB per font and 96 MiB total. Events older than sixty seconds are pruned. A stream

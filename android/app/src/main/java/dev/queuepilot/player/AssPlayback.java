@@ -23,33 +23,76 @@ final class AssPlayback {
   final AssFonts fonts = new AssFonts();
   final AssOverlay overlay;
   private AssRenderer renderer;
-  AssPlayback(Context context) { overlay = new AssOverlay(context); }
-  void videoSize(int width, int height) { if (renderer != null) renderer.videoSize(width,height); }
+  private int videoWidth = 1920, videoHeight = 1080;
+
+  AssPlayback(Context context) {
+    overlay = new AssOverlay(context);
+    overlay.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> updateViewport());
+  }
+
+  void videoSize(int width, int height) {
+    if (width <= 0 || height <= 0) return;
+    videoWidth = width; videoHeight = height; updateViewport();
+  }
+
+  private void updateViewport() {
+    if (renderer == null || overlay.getWidth() == 0 || overlay.getHeight() == 0) return;
+    float scale = Math.min((float)overlay.getWidth()/videoWidth, (float)overlay.getHeight()/videoHeight);
+    renderer.videoSize(Math.max(1, Math.round(videoWidth*scale)), Math.max(1, Math.round(videoHeight*scale)));
+  }
+
   DefaultRenderersFactory renderers(Context context) {
     return new DefaultRenderersFactory(context) {
-      @Override protected void buildTextRenderers(Context context, TextOutput output, Looper looper, int mode, ArrayList<Renderer> out) {
-        renderer = new AssRenderer(fonts, overlay); out.add(renderer);
-        super.buildTextRenderers(context,output,looper,mode,out);
+      @Override
+      protected void buildTextRenderers(
+          Context context, TextOutput output, Looper looper, int mode, ArrayList<Renderer> out) {
+        renderer = new AssRenderer(fonts, overlay);
+        out.add(renderer);
+        super.buildTextRenderers(context, output, looper, mode, out);
       }
     };
   }
+
   ExtractorsFactory extractors() {
     SubtitleParser.Factory defaults = new DefaultSubtitleParserFactory();
-    SubtitleParser.Factory parsers = new SubtitleParser.Factory() {
-      @Override public boolean supportsFormat(Format format) {
-        return !(MimeTypes.TEXT_SSA.equals(format.sampleMimeType) && MimeTypes.VIDEO_MATROSKA.equals(format.containerMimeType)) && defaults.supportsFormat(format);
-      }
-      @Override public int getCueReplacementBehavior(Format format) { return defaults.getCueReplacementBehavior(format); }
-      @Override public SubtitleParser create(Format format) { return defaults.create(format); }
-    };
-    DefaultExtractorsFactory defaultsFactory = new DefaultExtractorsFactory().setSubtitleParserFactory(parsers);
+    SubtitleParser.Factory parsers =
+        new SubtitleParser.Factory() {
+          @Override
+          public boolean supportsFormat(Format format) {
+            return !(MimeTypes.TEXT_SSA.equals(format.sampleMimeType)
+                    && MimeTypes.VIDEO_MATROSKA.equals(format.containerMimeType))
+                && defaults.supportsFormat(format);
+          }
+
+          @Override
+          public int getCueReplacementBehavior(Format format) {
+            return defaults.getCueReplacementBehavior(format);
+          }
+
+          @Override
+          public SubtitleParser create(Format format) {
+            return defaults.create(format);
+          }
+        };
+    DefaultExtractorsFactory defaultsFactory =
+        new DefaultExtractorsFactory().setSubtitleParserFactory(parsers);
     return new ExtractorsFactory() {
       private Extractor[] replace(Extractor[] extractors) {
-        for (int index=0; index<extractors.length; index++) if (extractors[index] instanceof MatroskaExtractor) extractors[index] = new AssMatroskaExtractor(parsers,fonts);
+        for (int index = 0; index < extractors.length; index++)
+          if (extractors[index] instanceof MatroskaExtractor)
+            extractors[index] = new AssMatroskaExtractor(parsers, fonts);
         return extractors;
       }
-      @Override public Extractor[] createExtractors() { return replace(defaultsFactory.createExtractors()); }
-      @Override public Extractor[] createExtractors(Uri uri, Map<String,List<String>> headers) { return replace(defaultsFactory.createExtractors(uri,headers)); }
+
+      @Override
+      public Extractor[] createExtractors() {
+        return replace(defaultsFactory.createExtractors());
+      }
+
+      @Override
+      public Extractor[] createExtractors(Uri uri, Map<String, List<String>> headers) {
+        return replace(defaultsFactory.createExtractors(uri, headers));
+      }
     };
   }
 }
