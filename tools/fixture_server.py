@@ -107,7 +107,7 @@ class Handler(BaseHTTPRequestHandler):
         if offline:self.respond('unavailable',code=503);return
         if path=='/:/timeline':self.respond('<MediaContainer/>');return
         if path=='/library/onDeck':
-            self.respond('<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg"/></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/sections':
             self.respond('<MediaContainer><Directory key="1" type="show" title="Series"/></MediaContainer>');return
         if path=='/library/sections/1/all':
@@ -115,11 +115,11 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/library/metadata/100/children':
             self.respond('<MediaContainer><Directory ratingKey="101" type="season" title="Season 1" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/101/children':
-            self.respond('<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg"/></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/103':
             self.respond('<MediaContainer><Video ratingKey="103" type="episode" index="10" title="The return" duration="30000" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/></Video></MediaContainer>');return
         if path=='/library/metadata/102':
-            self.respond('<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" duration="30000" viewOffset="4000" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="/art/omar.jpg"/></Video></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" duration="30000" viewOffset="{60000 if video_fixture.endswith("styled.mkv") else 4000}" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="/art/omar.jpg"/></Video></MediaContainer>');return
         if path=='/photo/:/transcode':
             width=int(parse_qs(parsed.query).get('width',['240'])[0]);art=parse_qs(parsed.query).get('url',[''])[0];name=art.split('/')[-1] if art in ('/art/nadia.jpg','/art/omar.jpg') else ('high.jpg' if width>240 else 'low.jpg');data=(ROOT/name).read_bytes();self.respond(data,'image/jpeg');return
         if path=='/video/sample.mp4':

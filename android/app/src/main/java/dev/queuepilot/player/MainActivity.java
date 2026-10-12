@@ -1325,7 +1325,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.action(actions, "Back to title", this::back, false);
     root.addView(overlay, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     setContentView(root);
-    AssPlayback ass = new AssPlayback(this);
+    androidx.media3.datasource.DataSource.Factory dataSourceFactory =
+        PlexDataSource.factory(playingOrigin.isEmpty() ? server() : playingOrigin, secret);
+    AssPlayback ass = new AssPlayback(this, dataSourceFactory, android.net.Uri.parse(url));
     assPlayback = ass;
     playerView.getOverlayFrameLayout().addView(ass.overlay, new FrameLayout.LayoutParams(-1, -1));
     player =
@@ -1336,10 +1338,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     .setPrioritizeTimeOverSizeThresholds(false)
                     .build())
             .setMediaSourceFactory(
-                new DefaultMediaSourceFactory(
-                    PlexDataSource.factory(
-                        playingOrigin.isEmpty() ? server() : playingOrigin, secret),
-                    ass.extractors()))
+                new DefaultMediaSourceFactory(dataSourceFactory, ass.extractors()))
             .build();
     mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);

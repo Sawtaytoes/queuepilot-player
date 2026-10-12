@@ -21,6 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @androidx.media3.common.util.UnstableApi
 final class AssRenderer extends BaseRenderer {
   private final AssFonts fonts;
+  private final AssSeekReader seekReader;
+  private boolean restorePending = true;
   private final AssOverlay overlay;
   private final Handler main = new Handler(Looper.getMainLooper());
   private final DecoderInputBuffer input =
@@ -42,10 +44,12 @@ final class AssRenderer extends BaseRenderer {
   private volatile int width = 1920, height = 1080;
   private long lastFrameUs = C.TIME_UNSET;
   private int seekSamples;
+  private long streamOffsetUs;
 
-  AssRenderer(AssFonts fonts, AssOverlay overlay) {
+  AssRenderer(AssFonts fonts, AssOverlay overlay, AssSeekReader seekReader) {
     super(C.TRACK_TYPE_TEXT);
     this.fonts = fonts;
+    this.seekReader = seekReader;
     this.overlay = overlay;
   }
 
@@ -73,6 +77,7 @@ final class AssRenderer extends BaseRenderer {
 
   @Override
   protected void onEnabled(boolean joining, boolean mayRenderStartOfStream) {
+    restorePending = true;
     if (thread == null) {
       thread = new HandlerThread("QueuePilot ASS");
       thread.start();
@@ -83,6 +88,7 @@ final class AssRenderer extends BaseRenderer {
   @Override
   protected void onStreamChanged(
       Format[] formats, long start, long offset, MediaSource.MediaPeriodId period) {
+    streamOffsetUs = offset;
     Format next = formats[0];
     boolean same =
         format != null
@@ -95,6 +101,7 @@ final class AssRenderer extends BaseRenderer {
 
   private void resetTrack() {
     int revision = ++generation;
+    restorePending = true;
     pending = false;
     ended = false;
     input.clear();
@@ -131,11 +138,14 @@ final class AssRenderer extends BaseRenderer {
 
   @Override
   protected void onPositionReset(long position, boolean joining, boolean resetToKeyframe) {
+    restorePending = true;
+    frameDirty = true;
     seekSamples = 0;
     android.util.Log.d("QueuePilotLibass", "Subtitle seek=" + position / 1000);
     // libass handles time moving backwards. Retain already-decoded, still-active events:
     // a long sign can start before the container's video seek point.
     int revision = ++generation;
+    restorePending = true;
     pending = false;
     ended = false;
     input.clear();
@@ -149,6 +159,45 @@ final class AssRenderer extends BaseRenderer {
   @Override
   public void render(long positionUs, long elapsedRealtimeUs) {
     int revision = generation;
+    if (restorePending && format != null && seekReader.index.ready()) {
+      restorePending = false;
+      try {
+        int track = Integer.parseInt(format.id);
+        Handler recoveryWorker = worker;
+        long streamOffsetMs = streamOffsetUs / 1000;
+        seekReader.restore(
+            track,
+            (positionUs - streamOffsetUs) / 1000,
+            () -> revision == generation,
+            packet -> {
+              java.util.concurrent.CountDownLatch applied =
+                  new java.util.concurrent.CountDownLatch(1);
+              if (!recoveryWorker.post(
+                  () -> {
+                    try {
+                      if (revision != generation || nativeHandle == 0) return;
+                      AssNative.packet(
+                          nativeHandle,
+                          packet.data(),
+                          packet.startMs() + streamOffsetMs,
+                          packet.durationMs());
+                      frameDirty = true;
+                    } finally {
+                      applied.countDown();
+                    }
+                  })) return;
+              // Backpressure on the I/O thread: at most one recovered packet waits for libass.
+              try {
+                while (revision == generation
+                    && !applied.await(100, java.util.concurrent.TimeUnit.MILLISECONDS)) {}
+              } catch (InterruptedException cancelled) {
+                Thread.currentThread().interrupt();
+              }
+            });
+      } catch (NumberFormatException ignored) {
+        /* No matching Matroska track. */
+      }
+    }
     for (int count = 0; count < 32 && !ended && queuedBytes.get() < 8 * 1024 * 1024; count++) {
       if (!pending) {
         input.clear();

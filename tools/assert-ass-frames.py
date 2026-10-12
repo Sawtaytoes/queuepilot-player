@@ -38,3 +38,12 @@ for name in ['ass-authored','ass-selected','ass-reenabled-paused','ass-seek-paus
     print(name,'outline pixels',actual_blue,'mean pixel error',round(error,3),'outline overlap',round(overlap,3))
 assert blue(Image.open(root/'ass-off.png').convert('RGB'))<30,'Off must clear the ASS overlay'
 print('PASS: attached-font shape and placement match reference; blue outlines and positioned sign survive switching/seeking; Off clears output')
+
+def magenta(image, box):
+    return sum(1 for r,g,b in image.crop(box).getdata() if r>100 and b>100 and g<100)
+for name in ['ass-authored','ass-restored-long','ass-long-reenabled']:
+    image=Image.open(root/(name+'.png')).convert('RGB')
+    assert magenta(image,(200,570,1000,655))>300,(name,'first long overlapping cue absent')
+    assert magenta(image,(200,670,1000,745))>300,(name,'second long overlapping cue absent')
+assert magenta(Image.open(root/'ass-expired.png').convert('RGB'),(200,570,1000,745))<30,'Expired cues must disappear'
+print('PASS: fresh resume and paused backward seek restore every long overlapping cue after native pruning')

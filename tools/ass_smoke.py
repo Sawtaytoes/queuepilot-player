@@ -25,6 +25,7 @@ time.sleep(6);s.shot('ass-authored');time.sleep(2);s.shot('ass-moving')
 logs=s.adb('logcat','-d','-s','QueuePilotLibass').decode()
 assert 'ABeeZee' in logs,logs
 assert 'fontselect' in logs,logs
+assert re.search(r'Restored overlapping cues=5 at=',logs), logs
 key(127);gear();choose('Authored ASS')
 key(126);time.sleep(4);s.shot('ass-selected')
 gear();s.click('Off');time.sleep(4);s.shot('ass-off')
@@ -32,6 +33,19 @@ key(127);gear();choose('Plain text');time.sleep(1)
 gear();choose('Authored ASS');time.sleep(4);hide_controls();s.shot('ass-reenabled-paused')
 key(89);time.sleep(4);hide_controls();s.shot('ass-seek-paused')
 key(126);time.sleep(4);s.shot('ass-after-seek')
+# Move beyond the long cues' end + the native 60-second retention window,
+# then seek backward while paused. Both overlaps must be rehydrated from the file.
+def seek_to(seconds):
+    key(19)
+    node=next(n for n in s.screen().iter('node') if n.get('resource-id','').endswith('/exo_progress'))
+    left,top,right,bottom=map(int,re.findall(r'\d+',node.get('bounds')))
+    # The seek bar has a small inset; these targets have wide acceptance intervals.
+    s.adb('shell','input','tap',str(round(left+(right-left)*seconds/240)),str((top+bottom)//2))
+    time.sleep(4);hide_controls()
+key(127);seek_to(220);s.shot('ass-expired')
+seek_to(60);s.shot('ass-restored-long')
+gear();s.click('Off');gear();choose('Authored ASS')
+time.sleep(4);hide_controls();s.shot('ass-long-reenabled')
 assert 'FATAL EXCEPTION' not in s.adb('logcat','-d','-b','crash').decode()
 s.back();s.post('_online')
 print('PASS: embedded font selected, authored ASS track, subtitle Off, SRT/ASS switching, backward seek; pixel comparison required on host')

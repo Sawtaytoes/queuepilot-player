@@ -21,11 +21,13 @@ import java.util.Map;
 @androidx.media3.common.util.UnstableApi
 final class AssPlayback {
   final AssFonts fonts;
+  final AssSeekReader seekReader;
   final AssOverlay overlay;
   private AssRenderer renderer;
   private int videoWidth = 1920, videoHeight = 1080;
 
-  AssPlayback(Context context) {
+  AssPlayback(Context context, androidx.media3.datasource.DataSource.Factory factory, Uri uri) {
+    seekReader = new AssSeekReader(factory, uri);
     fonts = new AssFonts(context);
     overlay = new AssOverlay(context);
     overlay.addOnLayoutChangeListener(
@@ -33,6 +35,7 @@ final class AssPlayback {
   }
 
   void close() {
+    seekReader.close();
     fonts.close();
   }
 
@@ -57,7 +60,7 @@ final class AssPlayback {
       @Override
       protected void buildTextRenderers(
           Context context, TextOutput output, Looper looper, int mode, ArrayList<Renderer> out) {
-        renderer = new AssRenderer(fonts, overlay);
+        renderer = new AssRenderer(fonts, overlay, seekReader);
         out.add(renderer);
         super.buildTextRenderers(context, output, looper, mode, out);
       }
@@ -91,7 +94,8 @@ final class AssPlayback {
       private Extractor[] replace(Extractor[] extractors) {
         for (int index = 0; index < extractors.length; index++)
           if (extractors[index] instanceof MatroskaExtractor)
-            extractors[index] = new AssPrerollExtractor(new AssMatroskaExtractor(parsers, fonts));
+            extractors[index] =
+                new AssPrerollExtractor(new AssMatroskaExtractor(parsers, fonts, seekReader));
         return extractors;
       }
 
