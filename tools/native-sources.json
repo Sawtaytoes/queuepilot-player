@@ -1,0 +1,6 @@
+[
+  {"name":"libass","repository":"libass/libass","version":"0.17.5","commit":"4a05d8127f525943ebf45fdc6497c9e665947f0d","license":"ISC"},
+  {"name":"freetype","repository":"freetype/freetype","version":"2.14.1","commit":"526ec5c47b9ebccc4754c85ac0c0cdf7c85a5e9b","license":"FTL"},
+  {"name":"fribidi","repository":"fribidi/fribidi","version":"1.0.17","commit":"b93119f5fdc7ea47672cc304c1455ffa6dfe7536","license":"LGPL-2.1-or-later"},
+  {"name":"harfbuzz","repository":"harfbuzz/harfbuzz","version":"14.6.0","commit":"c7a7457b7385f33178e8cf87615ca077a810bbe7","license":"MIT"}
+]

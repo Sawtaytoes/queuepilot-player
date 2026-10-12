@@ -45,6 +45,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private LinearLayout content;
   private TextView status;
   private ExoPlayer player;
+  private AssPlayback assPlayback;
   private PlayerView playerView;
   private androidx.media3.session.MediaSession mediaSession;
   private volatile int generation;
@@ -1324,12 +1325,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.action(actions, "Back to title", this::back, false);
     root.addView(overlay, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     setContentView(root);
+    AssPlayback ass = new AssPlayback(this);
+    assPlayback = ass;
+    playerView.getOverlayFrameLayout().addView(ass.overlay, new FrameLayout.LayoutParams(-1, -1));
     player =
-        new ExoPlayer.Builder(this)
+        new ExoPlayer.Builder(this, ass.renderers(this))
+            .setLoadControl(
+                new androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setTargetBufferBytes(32 * 1024 * 1024)
+                    .setPrioritizeTimeOverSizeThresholds(false)
+                    .build())
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(
                     PlexDataSource.factory(
-                        playingOrigin.isEmpty() ? server() : playingOrigin, secret)))
+                        playingOrigin.isEmpty() ? server() : playingOrigin, secret),
+                    ass.extractors()))
             .build();
     mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);
@@ -1345,6 +1355,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         new Player.Listener() {
           @Override
           public void onVideoSizeChanged(VideoSize size) {
+            ass.videoSize(Math.round(size.width * size.pixelWidthHeightRatio), size.height);
             status.setText("Decoded video: " + size.width + " × " + size.height);
           }
 
@@ -2433,6 +2444,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     d.setPanelSize(dp(360), -2);
   }
 
+  @Override
+  public boolean onKeyDown(int keyCode, KeyEvent event) {
+    // Keep foreground media keys with the visible player, including when Cast or
+    // another overlay owns focus. Shield's legacy session fallback can supply
+    // an empty controller package for injected media keys.
+    if (playerView != null && playerView.dispatchMediaKeyEvent(event)) return true;
+    return super.onKeyDown(keyCode, event);
+  }
+
+  @Override
+  public boolean onKeyUp(int keyCode, KeyEvent event) {
+    if (playerView != null && playerView.dispatchMediaKeyEvent(event)) return true;
+    return super.onKeyUp(keyCode, event);
+  }
+
   private void releasePlayer() {
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     if (player != null) {
@@ -2443,6 +2469,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       }
       player.release();
       player = null;
+    }
+    if (assPlayback != null) {
+      assPlayback.close();
+      assPlayback = null;
     }
     playerView = null;
   }

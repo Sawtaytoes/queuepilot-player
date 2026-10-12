@@ -26,6 +26,7 @@ class Handler(BaseHTTPRequestHandler):
         global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture
         path=urlparse(self.path).path
         if path=='/_offline': offline=True; self.respond('ok');return
+        if path=='/_ass': video_fixture='styled.mkv';self.respond('ok');return
         if path=='/_tracks': video_fixture='tracks.mkv';self.respond('ok');return
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
         if path=='/_online': video_fixture='sample.mp4';offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
