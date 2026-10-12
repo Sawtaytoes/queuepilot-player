@@ -33,12 +33,25 @@ and offers a Cast overlay. Artwork cards request a 720-pixel derivative; title a
 requests 1440 pixels. The detail screen can compare actual 240px and 1440px responses.
 The interface does not claim native 4K composition on every Android TV device.
 
-QueuePilot registry browsing is available after connecting a QueuePilot server in Settings.
-**Native queue starts remain unfinished.** Queue cards explain that state instead of sending
-`/api/play`, which controls external players. The proposed integration uses the existing
-engine's selection and history rules; see [native sessions](docs/native-sessions.md).
+Connect a QueuePilot server in Settings or Watching. The TV lists **Plex queues only**,
+with people portraits and the existing required/optional audience filter. A queue starts
+inside the app using an engine-produced plan. The actual Plex Home profile must match the
+queue binding; a mismatched profile is offered an explicit switch before playback.
+Native playback never sends `/api/play` or controls another app or the room.
 
-This preview does not negotiate transcoding, report Plex watch history, import real story
+Playback sends profile-scoped Plex progress and resume history. Queue starts also preserve
+QueuePilot-owned history and authored section boundaries. Pending native progress is encrypted
+locally and retried in order; invalid or expired grants are retained for review rather than
+silently borrowing owner privileges. Queue snapshots and the people filter survive restart;
+starting a new queue still requires the server. An active lineup is not restored after a crash.
+
+The Cast overlay shows available portraits, actor names and roles from Plex metadata.
+It is the title cast, not scene-by-scene actor recognition. Profiles also show their avatars.
+**Rewind on resume** defaults to three seconds and can be disabled or changed in Settings.
+Player focus highlights are rounded, including the seek buttons with interval labels.
+See [native sessions](docs/native-sessions.md).
+
+This preview does not negotiate transcoding, import real story
 ordering manifests, or download media. Faithful ASS rendering, attached fonts, large
 subtitles, HDR conversion, Dolby Vision, and passthrough still need explicit device evidence.
 Library grids request pages of 30 items. Demo Episode 9 → OVA → Episode 10 ordering and

@@ -47,10 +47,23 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private TextView status;
   private ExoPlayer player;
   private PlayerView playerView;
+  private androidx.media3.session.MediaSession mediaSession;
   private volatile int generation;
   private int mainWidth;
   private boolean fixture;
   private Screen current;
+  private JSONObject nativePlan;
+  private int nativeIndex;
+  private long nativeSequence;
+  private final ExecutorService progressNetwork = Executors.newSingleThreadExecutor();
+  private PlexCatalog.Entry playingEntry;
+  private String playingOrigin = "", playingToken = "";
+  private long sectionFloor, sectionEnd = -1;
+  private boolean advancing;
+  private final RewindOnResume rewind = new RewindOnResume();
+  private JSONObject pendingNativeQueue;
+  private String pendingNativeProfile = "";
+  private JSONArray queuePeople = new JSONArray();
 
   private record Screen(String kind, String path, String title, PlexCatalog.Entry entry, int page) {
     Screen(String kind, String path, String title, PlexCatalog.Entry entry) {
@@ -75,6 +88,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     super.onCreate(state);
     ui = new TvUi(this);
     store = new ProfileStore(this);
+    progressNetwork.execute(this::flushNativeEvents);
     getOnBackPressedDispatcher()
         .addCallback(
             this,
@@ -158,6 +172,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void back() {
+    if (player != null) reportPlayback("stopped");
+    advancing = true;
+    nativePlan = null;
+    pendingNativeQueue = null;
+    pendingNativeProfile = "";
+
     if (!history.isEmpty()) render(history.pop());
     else if (current != null && !Set.of("home", "welcome").contains(current.kind())) home();
     else moveTaskToBack(true);
@@ -202,6 +222,19 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     rail.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1));
     TextView profileButton =
         ui.button("●  " + profileName(), () -> navigate(new Screen("profiles")), false);
+    if (profile != null) {
+      ImageView face = avatar(44);
+      String thumb = profile.optString("thumb");
+      JSONArray users = account.optJSONArray("users");
+      if (thumb.isEmpty() && users != null)
+        for (int i = 0; i < users.length(); i++) {
+          JSONObject user = users.optJSONObject(i);
+          if (user != null && userId(user).equals(activeId)) thumb = user.optString("thumb");
+        }
+      loadProfileAvatar(face, thumb);
+      rail.addView(face);
+      ui.gap(rail, 8);
+    }
     rail.addView(profileButton);
     ui.gap(rail, 12);
     rail.addView(ui.text(profile == null ? "Demo library" : "Plex library", 11, TvUi.MUTED));
@@ -636,14 +669,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         JSONObject user = users.optJSONObject(i);
         if (user == null) continue;
         String name = user.optString("title", user.optString("username", "Profile"));
-        row.addView(
+        LinearLayout profileCard =
             ui.card(
                 user.optBoolean("protected") ? "PIN protected" : "Plex Home",
                 name,
                 "",
                 "Choose profile",
                 () -> selectUser(user),
-                220));
+                220);
+        ImageView face = avatar(70);
+        loadProfileAvatar(face, user.optString("thumb"));
+        profileCard.addView(face, 0);
+        row.addView(profileCard);
       }
     else
       for (int i = 0; i < profiles.length(); i++) {
@@ -695,6 +732,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         if (p != null && p.optString("id").equals(id)) {
           setProfile(id);
           home();
+          playPendingNative();
           return;
         }
       }
@@ -712,7 +750,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
               .setMessage("Enter this profile's four-digit Plex Home PIN.")
               .setView(form)
               .setPositiveButton("Continue", null)
-              .setNegativeButton("Cancel", null)
+              .setNegativeButton(
+                  "Cancel",
+                  (d, w) -> {
+                    pendingNativeQueue = null;
+                    pendingNativeProfile = "";
+                  })
               .create();
       Runnable update =
           () -> {
@@ -788,6 +831,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           try {
             String userToken = auth.switchUser(account.getString("token"), userId(user), pin);
             JSONArray servers = auth.servers(userToken);
+            for (int i = 0; i < servers.length(); i++)
+              servers.getJSONObject(i).put("profileProof", userToken);
             runOnUiThread(
                 () -> {
                   if (request != generation) return;
@@ -876,7 +921,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     .put("server", origin)
                     .put("serverName", selected.optString("name"))
                     .put("serverId", selected.optString("clientIdentifier"))
-                    .put("token", secret);
+                    .put("token", secret)
+                    .put("profileProof", selected.optString("profileProof"))
+                    .put("thumb", user.optString("thumb"));
             runOnUiThread(
                 () -> {
                   if (request != generation) return;
@@ -893,6 +940,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     setProfile(p.optString("id"));
                     prefs().edit().putBoolean("preview", false).apply();
                     home();
+                    playPendingNative();
                   } catch (Exception e) {
                     status.setText("Credentials could not be saved. Please try again.");
                   }
@@ -1215,12 +1263,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             if (detail.part().isEmpty()) throw new IllegalStateException();
             runOnUiThread(
                 () -> {
-                  if (request == generation)
+                  if (request == generation) {
+                    nativePlan = null;
+                    playingEntry = detail;
+                    playingOrigin = origin;
+                    playingToken = secret;
+                    sectionFloor = 0;
+                    sectionEnd = -1;
+                    advancing = false;
                     startPlayer(
                         PlexCatalog.url(origin, detail.part()),
                         secret,
                         detail.title(),
                         detail.cast());
+                    player.seekTo(detail.resume());
+                  }
                 });
           } catch (Exception e) {
             runOnUiThread(
@@ -1234,7 +1291,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void startPlayer(String url, String secret, String title, String cast) {
     reset();
-    history.push(current);
+    if (current == null || !current.kind().equals("player")) history.push(current);
     current = new Screen("player");
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     FrameLayout root = new FrameLayout(this);
@@ -1250,23 +1307,33 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.gap(overlay, 10);
     LinearLayout actions = ui.row();
     overlay.addView(actions);
-    ui.action(
-        actions,
-        "Cast",
-        () ->
-            message(
-                "Title cast",
-                cast.isEmpty() ? "No cast information is available for this title." : cast),
-        false);
+    ui.action(actions, "Cast", () -> showCast(playingEntry), false);
+    if (nativePlan != null)
+      ui.action(
+          actions,
+          "Next queue item",
+          () -> {
+            if (advancing) return;
+            reportPlayback("skip");
+            advancing = true;
+            nativeIndex++;
+            loadNativeItem();
+          },
+          false);
     ui.action(actions, "Back to title", this::back, false);
     root.addView(overlay, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     setContentView(root);
     player =
         new ExoPlayer.Builder(this)
             .setMediaSourceFactory(
-                new DefaultMediaSourceFactory(PlexDataSource.factory(server(), secret)))
+                new DefaultMediaSourceFactory(
+                    PlexDataSource.factory(
+                        playingOrigin.isEmpty() ? server() : playingOrigin, secret)))
             .build();
+    mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);
+    roundPlayerControls(playerView);
+    rewind.reset();
     playerView.setControllerShowTimeoutMs(3500);
     playerView.setControllerVisibilityListener(
         (androidx.media3.ui.PlayerView.ControllerVisibilityListener)
@@ -1279,17 +1346,81 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           }
 
           @Override
+          public void onPlayWhenReadyChanged(boolean ready, int reason) {
+            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST) {
+              if (!ready) {
+                rewind.pause();
+                reportPlayback("paused");
+              } else {
+                long currentPosition = player.getCurrentPosition(),
+                    resumePosition =
+                        rewind.resume(
+                            currentPosition, sectionFloor, prefs().getInt("rewind-seconds", 3));
+                if (resumePosition != currentPosition) player.seekTo(resumePosition);
+                if (player.getPlaybackState() == Player.STATE_READY) reportPlayback("playing");
+              }
+            }
+          }
+
+          @Override
+          public void onPlaybackStateChanged(int state) {
+            if (state == Player.STATE_READY)
+              reportPlayback(player.getPlayWhenReady() ? "playing" : "paused");
+            if (state == Player.STATE_ENDED) {
+              reportPlayback("ended");
+              if (nativePlan != null && !advancing) {
+                advancing = true;
+                nativeIndex++;
+                loadNativeItem();
+              }
+            }
+          }
+
+          @Override
           public void onPlayerError(PlaybackException error) {
+            reportPlayback("error");
             overlay.setVisibility(View.VISIBLE);
             status.setText(
                 "This file couldn't play directly. Server conversion is not available in this"
                     + " preview.");
           }
         });
-    player.setMediaItem(MediaItem.fromUri(url));
+    player.setMediaItem(
+        new MediaItem.Builder()
+            .setUri(url)
+            .setMediaId(playingEntry == null ? "video" : playingEntry.key())
+            .setMediaMetadata(
+                new androidx.media3.common.MediaMetadata.Builder().setTitle(title).build())
+            .build());
     player.prepare();
     player.play();
     playerView.requestFocus();
+    final ExoPlayer observedPlayer = player;
+    handler.postDelayed(
+        new Runnable() {
+          private long reportedAt = 0;
+
+          public void run() {
+            if (player == null || player != observedPlayer) return;
+            if (nativePlan != null
+                && sectionEnd >= 0
+                && player.getCurrentPosition() >= sectionEnd
+                && !advancing) {
+              reportPlayback("section-end");
+              advancing = true;
+              nativeIndex++;
+              loadNativeItem();
+              return;
+            }
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (now - reportedAt >= 10000) {
+              reportPlayback(player.isPlaying() ? "playing" : "paused");
+              reportedAt = now;
+            }
+            handler.postDelayed(this, 250);
+          }
+        },
+        250);
   }
 
   private void demoSeason() {
@@ -1352,48 +1483,387 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       content.addView(ui.button("Connect QueuePilot", this::queueSetup, true));
       return;
     }
-    status.setText("Loading queues…");
+    Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
+    ui.action(content, "Choose people", this::chooseQueuePeople, false);
+    status.setText(selected.isEmpty() ? "All Plex queues · loading…" : "Finding your Plex queues…");
     int request = generation;
     network.execute(
         () -> {
           try {
-            JSONObject result =
-                new JSONObject(
-                    new String(
-                        PlexCatalog.get(origin + "/api/sets", "", 8 * 1024 * 1024),
-                        StandardCharsets.UTF_8));
-            JSONArray sets = result.optJSONArray("sets");
+            String path =
+                "/api/native/queues?people="
+                    + PlexAccount.encode(String.join(",", new TreeSet<>(selected)));
+            JSONObject response;
+            try {
+              response = NativeQueueApi.request(origin, path, null, "", "");
+              java.nio.file.Files.write(
+                  cacheFile("native-tv", origin, path).toPath(),
+                  response.toString().getBytes(StandardCharsets.UTF_8));
+            } catch (Exception offline) {
+              response =
+                  new JSONObject(
+                      new String(
+                          java.nio.file.Files.readAllBytes(
+                              cacheFile("native-tv", origin, path).toPath()),
+                          StandardCharsets.UTF_8));
+              response.put("cached", true);
+            }
+            JSONObject result = response;
             runOnUiThread(
                 () -> {
                   if (request != generation) return;
+                  queuePeople = result.optJSONArray("people");
+                  if (queuePeople == null) queuePeople = new JSONArray();
+                  JSONArray queues = result.optJSONArray("queues");
                   status.setText(
-                      "Queue browsing is available. Playing these queues inside this app is still"
-                          + " being built.");
-                  LinearLayout row = horizontal();
-                  if (sets != null)
-                    for (int i = 0; i < sets.length(); i++) {
-                      JSONObject item = sets.optJSONObject(i);
-                      if (item != null)
-                        row.addView(
-                            ui.card(
-                                "Watching",
-                                item.optString("label", item.optString("id")),
-                                "",
-                                "Queue details",
-                                () ->
-                                    message(
-                                        item.optString("label", "Queue"),
-                                        "This queue is available on your QueuePilot server. Native"
-                                            + " queue playback is not available in this preview."),
-                                280));
+                      (result.optBoolean("cached")
+                              ? "Saved queues · reconnect to start playback · "
+                              : "")
+                          + (selected.isEmpty() ? "All people" : selectedPeopleLabel(selected))
+                          + " · "
+                          + (queues == null ? 0 : queues.length())
+                          + " Plex queues");
+                  if (queues == null || queues.length() == 0) {
+                    content.addView(
+                        ui.text(
+                            "No matching queues. Choose different people or clear the filter.",
+                            17,
+                            TvUi.MUTED));
+                    return;
+                  }
+                  LinearLayout row = null;
+                  for (int i = 0; i < queues.length(); i++) {
+                    if (i % 3 == 0) {
+                      row = ui.row();
+                      content.addView(row);
+                      ui.gap(content, 18);
                     }
+                    JSONObject queue = queues.optJSONObject(i);
+                    if (queue == null) continue;
+                    LinearLayout card =
+                        ui.card(
+                            queue.optString("kind").equals("rules") ? "Rules" : "Picks",
+                            queue.optString("title", "Movies & Shows"),
+                            queueAudience(queue),
+                            "Play queue",
+                            () -> startNativeQueue(queue),
+                            (mainWidth - 48) / 3);
+                    LinearLayout faces = ui.row();
+                    JSONArray people = queue.optJSONArray("people");
+                    if (people != null)
+                      for (int j = 0; j < Math.min(4, people.length()); j++) {
+                        String id = people.optString(j);
+                        ImageView face = avatar(36);
+                        faces.addView(face);
+                        loadQueueAvatar(face, id, origin);
+                      }
+                    card.addView(faces, 1);
+                    row.addView(card);
+                  }
                 });
-          } catch (Exception e) {
+          } catch (Exception error) {
             runOnUiThread(
                 () -> {
                   if (request == generation)
-                    status.setText(
-                        "QueuePilot couldn't be reached. Check the connection in Settings.");
+                    status.setText("QueuePilot couldn't load the TV queues. " + error.getMessage());
+                });
+          }
+        });
+  }
+
+  private String selectedPeopleLabel(Set<String> ids) {
+    List<String> names = new ArrayList<>();
+    for (int i = 0; i < queuePeople.length(); i++) {
+      JSONObject p = queuePeople.optJSONObject(i);
+      if (p != null && ids.contains(p.optString("id"))) names.add(p.optString("displayName"));
+    }
+    return String.join(" + ", names);
+  }
+
+  private String queueAudience(JSONObject queue) {
+    Set<String> ids = new HashSet<>();
+    JSONArray list = queue.optJSONArray("people");
+    if (list != null) for (int i = 0; i < list.length(); i++) ids.add(list.optString(i));
+    String people = selectedPeopleLabel(ids);
+    return people.isEmpty() ? "For everyone" : people;
+  }
+
+  private void chooseQueuePeople() {
+    Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
+    LinearLayout rows = ui.column();
+    rows.setPadding(dp(20), dp(12), dp(20), dp(12));
+    ScrollView scroll = new ScrollView(this);
+    scroll.addView(rows);
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("Who are these queues for?")
+            .setMessage(
+                "Select people to narrow the queues. This does not change the Plex playback"
+                    + " profile.")
+            .setView(scroll)
+            .setPositiveButton(
+                "Apply",
+                (d, w) -> {
+                  prefs().edit().putStringSet("queue-people", selected).apply();
+                  render(new Screen("queues"));
+                })
+            .setNeutralButton(
+                "All people",
+                (d, w) -> {
+                  prefs().edit().remove("queue-people").apply();
+                  render(new Screen("queues"));
+                })
+            .setNegativeButton("Cancel", null)
+            .create();
+    for (int i = 0; i < queuePeople.length(); i++) {
+      JSONObject person = queuePeople.optJSONObject(i);
+      if (person == null) continue;
+      String id = person.optString("id");
+      LinearLayout row = ui.row();
+      row.setGravity(Gravity.CENTER_VERTICAL);
+      ImageView face = avatar(42);
+      loadQueueAvatar(face, id, prefs().getString("queue-origin", ""));
+      row.addView(face);
+      CheckBox choice = new CheckBox(this);
+      choice.setText(person.optString("displayName"));
+      choice.setTextColor(TvUi.WHITE);
+      choice.setChecked(selected.contains(id));
+      choice.setOnCheckedChangeListener(
+          (v, checked) -> {
+            if (checked) selected.add(id);
+            else selected.remove(id);
+          });
+      row.addView(choice, new LinearLayout.LayoutParams(0, dp(54), 1));
+      rows.addView(row);
+    }
+    dialog.show();
+    dialog.getWindow().setLayout(dp(Math.min(600, mainWidth)), -2);
+  }
+
+  private void playPendingNative() {
+    if (pendingNativeQueue != null && activeId.equals(pendingNativeProfile)) {
+      JSONObject queue = pendingNativeQueue;
+      pendingNativeQueue = null;
+      pendingNativeProfile = "";
+      startNativeQueue(queue);
+    }
+  }
+
+  private void startNativeQueue(JSONObject queue) {
+    String required = queue.optString("requiredProfile");
+    JSONArray users = account.optJSONArray("users");
+    if (!required.isEmpty() && users != null) {
+      for (int i = 0; i < users.length(); i++) {
+        JSONObject user = users.optJSONObject(i);
+        if (user == null) continue;
+        if (required.equals(user.optString("title"))
+            || required.equals(user.optString("username"))) {
+          if (!userId(user).equals(activeId)) {
+            AlertDialog dialog =
+                new AlertDialog.Builder(this)
+                    .setTitle("Play as " + user.optString("title", required))
+                    .setMessage("This queue saves watch history to that Plex profile.")
+                    .setPositiveButton(
+                        "Switch and play",
+                        (d, w) -> {
+                          pendingNativeQueue = queue;
+                          pendingNativeProfile = userId(user);
+                          selectUser(user);
+                        })
+                    .setNegativeButton("Cancel", null)
+                    .create();
+            dialog.show();
+            dialog.getWindow().setLayout(dp(460), -2);
+            return;
+          }
+          break;
+        }
+      }
+    }
+    if (profile == null) {
+      message("Connect Plex", "Sign in with Plex before starting a queue.");
+      return;
+    }
+    String origin = prefs().getString("queue-origin", "");
+    status.setText("Preparing your queue…");
+    int request = generation;
+    network.execute(
+        () -> {
+          try {
+            String proof = profile.optString("profileProof");
+            if (proof.isEmpty()) {
+              JSONObject homeUser = null;
+              JSONArray homeRoster = account.optJSONArray("users");
+              if (homeRoster != null)
+                for (int i = 0; i < homeRoster.length(); i++) {
+                  JSONObject u = homeRoster.optJSONObject(i);
+                  if (u != null && userId(u).equals(activeId)) homeUser = u;
+                }
+              if (homeUser == null
+                  || (homeUser.optBoolean("protected") && !homeUser.optBoolean("admin")))
+                throw new IllegalStateException(
+                    "Choose your Plex profile again to authorize native playback.");
+              proof =
+                  homeUser.optBoolean("admin")
+                      ? account.getString("token")
+                      : auth.switchUser(account.getString("token"), activeId, "");
+              profile.put("profileProof", proof);
+              store.write(profiles);
+            }
+            progressNetwork.submit(this::flushNativeEvents).get();
+            JSONObject plan =
+                NativeQueueApi.request(
+                    origin,
+                    "/api/native/sessions",
+                    new JSONObject().put("setId", queue.getString("id")),
+                    "X-Plex-Profile-Token",
+                    proof);
+            plan.put("profileProof", proof);
+            runOnUiThread(
+                () -> {
+                  if (request != generation) return;
+                  nativePlan = plan;
+                  nativeIndex = plan.optInt("cursor");
+                  nativeSequence = plan.optLong("sequence");
+                  loadNativeItem();
+                });
+          } catch (Exception error) {
+            runOnUiThread(
+                () -> {
+                  if (request == generation) {
+                    status.setText("This queue couldn't start.");
+                    message("Queue playback", error.getMessage());
+                  }
+                });
+          }
+        });
+  }
+
+  private void loadNativeItem() {
+    advancing = true;
+    handler.removeCallbacksAndMessages(null);
+    releasePlayer();
+    JSONArray items = nativePlan.optJSONArray("items");
+    if (items == null || nativeIndex >= items.length()) {
+      JSONObject previous = nativePlan;
+      int continuationRequest = generation;
+      String origin = prefs().getString("queue-origin", "");
+      progressNetwork.execute(
+          () -> {
+            try {
+              flushNativeEvents();
+              JSONObject next =
+                  NativeQueueApi.request(
+                      origin,
+                      "/api/native/sessions/" + previous.getString("id") + "/continue",
+                      new JSONObject(),
+                      "X-Native-Session-Key",
+                      previous.getString("sessionKey"),
+                      previous.optString("profileProof"));
+              runOnUiThread(
+                  () -> {
+                    if (continuationRequest != generation || nativePlan != previous) return;
+                    if (next.optBoolean("complete")) {
+                      nativePlan = null;
+                      render(new Screen("queues"));
+                    } else {
+                      try {
+                        next.put("profileProof", previous.optString("profileProof"));
+                      } catch (Exception ignored) {
+                      }
+                      nativePlan = next;
+                      nativeIndex = 0;
+                      nativeSequence = 0;
+                      loadNativeItem();
+                    }
+                  });
+            } catch (Exception error) {
+              runOnUiThread(
+                  () -> {
+                    if (continuationRequest != generation || nativePlan != previous) return;
+                    message("Queue finished", error.getMessage());
+                    nativePlan = null;
+                    render(new Screen("queues"));
+                  });
+            }
+          });
+      return;
+    }
+    JSONObject item = items.optJSONObject(nativeIndex);
+    int request = generation;
+    String defaultOrigin = server(), defaultToken = token();
+    String serverId = item.optString("plexServer", nativePlan.optString("homeServerId"));
+    JSONObject boundProfile = profile;
+    network.execute(
+        () -> {
+          try {
+            String origin = defaultOrigin, secret = defaultToken;
+            if (!serverId.isEmpty() && !serverId.equals(boundProfile.optString("serverId"))) {
+              JSONArray resources = auth.servers(boundProfile.getString("profileProof"));
+              JSONObject resource = null;
+              for (int i = 0; i < resources.length(); i++)
+                if (resources.getJSONObject(i).optString("clientIdentifier").equals(serverId))
+                  resource = resources.getJSONObject(i);
+              if (resource == null)
+                throw new IllegalStateException("This profile cannot access the queued server");
+              origin = "";
+              secret = resource.getString("accessToken");
+              JSONArray connections = resource.getJSONArray("connections");
+              for (int i = 0; i < connections.length(); i++) {
+                JSONObject c = connections.getJSONObject(i);
+                String uri = c.optString("uri");
+                if (ServerConnectionPolicy.allowed(
+                    uri, c.optBoolean("local"), c.optBoolean("relay"))) {
+                  try {
+                    PlexCatalog.get(
+                        PlexCatalog.url(uri, "/library/sections"), secret, 8 * 1024 * 1024);
+                    origin = PlexCatalog.base(uri);
+                    break;
+                  } catch (Exception ignored) {
+                  }
+                }
+              }
+              if (origin.isEmpty())
+                throw new IllegalStateException("The queued server is unavailable");
+            }
+            PlexCatalog.Entry entry =
+                PlexCatalog.Entry.fromJson(
+                    PlexCatalog.list(
+                            PlexCatalog.get(
+                                PlexCatalog.url(
+                                    origin, "/library/metadata/" + item.getString("ratingKey")),
+                                secret,
+                                16 * 1024 * 1024))
+                        .getJSONObject(0));
+            if (entry.part().isEmpty())
+              throw new IllegalStateException("This item has no direct playback source");
+            String mediaOrigin = origin, mediaToken = secret;
+            runOnUiThread(
+                () -> {
+                  if (request != generation) return;
+                  playingEntry = entry;
+                  playingOrigin = mediaOrigin;
+                  playingToken = mediaToken;
+                  sectionFloor = item.optLong("sectionStartMs", 0);
+                  sectionEnd =
+                      item.has("sectionEndMs") && !item.isNull("sectionEndMs")
+                          ? item.optLong("sectionEndMs")
+                          : -1;
+                  startPlayer(
+                      PlexCatalog.url(mediaOrigin, entry.part()),
+                      mediaToken,
+                      entry.title(),
+                      entry.cast());
+                  advancing = false;
+                  player.seekTo(item.optLong("resumeMs", 0));
+                });
+          } catch (Exception error) {
+            runOnUiThread(
+                () -> {
+                  if (request == generation) {
+                    reportPlayback("error");
+                    message("Queue playback", error.getMessage());
+                  }
                 });
           }
         });
@@ -1438,7 +1908,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void settings() {
     shell("Settings");
     heading("QueuePilot TV", "Settings");
-    status.setText("Playback preview · 0.2.0");
+    status.setText("Playback preview · 0.3.0");
     LinearLayout row = horizontal();
     row.addView(
         ui.card(
@@ -1464,7 +1934,323 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             "Switch profile",
             () -> navigate(new Screen("profiles")),
             270));
+    ui.gap(content, 22);
+    content.addView(
+        ui.button(
+            "Rewind on resume · " + prefs().getInt("rewind-seconds", 3) + " seconds",
+            this::rewindSetting,
+            false));
     focusFirst(row.getChildAt(0));
+  }
+
+  private void rewindSetting() {
+    String[] choices = {"Off", "1 second", "3 seconds", "5 seconds", "10 seconds"};
+    int[] values = {0, 1, 3, 5, 10};
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("Rewind on resume")
+            .setItems(
+                choices,
+                (d, i) -> {
+                  prefs().edit().putInt("rewind-seconds", values[i]).apply();
+                  render(new Screen("settings"));
+                })
+            .setNegativeButton("Cancel", null)
+            .create();
+    dialog.show();
+    dialog.getWindow().setLayout(dp(400), -2);
+  }
+
+  private ImageView avatar(int size) {
+    ImageView face = new ImageView(this);
+    face.setScaleType(ImageView.ScaleType.CENTER_CROP);
+    face.setBackground(ui.shape(TvUi.PANEL, 0, size));
+    face.setLayoutParams(new LinearLayout.LayoutParams(dp(size), dp(size)));
+    face.setClipToOutline(true);
+    face.setOutlineProvider(
+        new ViewOutlineProvider() {
+          @Override
+          public void getOutline(View view, android.graphics.Outline outline) {
+            outline.setOval(0, 0, view.getWidth(), view.getHeight());
+          }
+        });
+    face.setImageResource(android.R.drawable.ic_menu_myplaces);
+    return face;
+  }
+
+  private void loadPicture(ImageView face, String address, String secret) {
+    if (address.isEmpty()) return;
+    int request = generation;
+    network.execute(
+        () -> {
+          try {
+            byte[] bytes =
+                secret.isEmpty()
+                    ? AvatarImage.get(address)
+                    : PlexCatalog.get(address, secret, 4 * 1024 * 1024);
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+            if (bounds.outWidth <= 0
+                || bounds.outWidth > 4096
+                || bounds.outHeight <= 0
+                || bounds.outHeight > 6144) return;
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = 1;
+            while (bounds.outWidth / options.inSampleSize > 512)
+              options.inSampleSize = options.inSampleSize == 0 ? 2 : options.inSampleSize * 2;
+            Bitmap image = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+            runOnUiThread(
+                () -> {
+                  if (request == generation) face.setImageBitmap(image);
+                });
+          } catch (Exception ignored) {
+          }
+        });
+  }
+
+  private void loadProfileAvatar(ImageView face, String thumb) {
+    if (thumb.isEmpty()) return;
+    if (fixture && thumb.startsWith("/")) {
+      loadPicture(face, "http://10.0.2.2:9010" + thumb, "");
+      return;
+    }
+    try {
+      java.net.URI uri = java.net.URI.create(thumb);
+      if (!"https".equals(uri.getScheme())) return;
+      loadPicture(face, thumb, "");
+    } catch (Exception ignored) {
+    }
+  }
+
+  private void loadQueueAvatar(ImageView face, String id, String origin) {
+    loadPicture(
+        face,
+        PlexCatalog.url(origin, "/api/native/people/" + PlexAccount.encode(id) + "/avatar"),
+        "");
+  }
+
+  private void showCast(PlexCatalog.Entry entry) {
+    if (entry == null || entry.roles().length() == 0) {
+      message("Title cast", "No cast information is available for this title.");
+      return;
+    }
+    ScrollView scroll = new ScrollView(this);
+    LinearLayout list = ui.column();
+    list.setPadding(dp(20), dp(12), dp(20), dp(20));
+    scroll.addView(list);
+    LinearLayout row = null;
+    for (int i = 0; i < entry.roles().length(); i++) {
+      if (i % 4 == 0) {
+        row = ui.row();
+        list.addView(row);
+        ui.gap(list, 20);
+      }
+      JSONObject actor = entry.roles().optJSONObject(i);
+      if (actor == null) continue;
+      LinearLayout card = ui.column();
+      ImageView face = avatar(100);
+      card.addView(face);
+      String thumb = actor.optString("thumb");
+      if (thumb.startsWith("/")) {
+        String origin = playingOrigin, secret = playingToken;
+        int request = generation;
+        network.execute(
+            () -> {
+              try {
+                Bitmap image = artwork(origin, secret, thumb, 360);
+                runOnUiThread(
+                    () -> {
+                      if (request == generation) face.setImageBitmap(image);
+                    });
+              } catch (Exception ignored) {
+              }
+            });
+      } else if (thumb.startsWith("https://")) loadPicture(face, thumb, "");
+      ui.gap(card, 10);
+      card.addView(ui.title(actor.optString("name"), 15));
+      ui.gap(card, 5);
+      card.addView(ui.text(actor.optString("role"), 12, TvUi.MUTED));
+      ui.focusable(
+          card, () -> message(actor.optString("name"), actor.optString("role")), TvUi.PANEL);
+      card.setContentDescription(actor.optString("name") + ". " + actor.optString("role"));
+      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(140), -2);
+      lp.setMargins(0, 0, dp(15), 0);
+      row.addView(card, lp);
+    }
+    AlertDialog dialog =
+        new AlertDialog.Builder(this)
+            .setTitle("Cast · " + entry.title())
+            .setView(scroll)
+            .setPositiveButton("Close", null)
+            .create();
+    dialog.show();
+    dialog
+        .getWindow()
+        .setLayout(dp(680), dp(Math.min(480, 160 + 170 * ((entry.roles().length() + 3) / 4))));
+  }
+
+  private void roundPlayerControls(View view) {
+    if (view.isClickable()
+        && view.isFocusable()
+        && !(view instanceof androidx.media3.ui.DefaultTimeBar)
+        && !(view instanceof PlayerView)) {
+      view.setForeground(null);
+      android.graphics.drawable.StateListDrawable states =
+          new android.graphics.drawable.StateListDrawable();
+      states.addState(
+          new int[] {android.R.attr.state_focused}, ui.shape(0x66202630, TvUi.ACCENT, 50));
+      states.addState(new int[] {android.R.attr.state_pressed}, ui.shape(0x88202630, 0, 50));
+      states.addState(new int[] {}, ui.shape(Color.TRANSPARENT, 0, 50));
+      if (view.getId() == androidx.media3.ui.R.id.exo_rew_with_amount
+          || view.getId() == androidx.media3.ui.R.id.exo_ffwd_with_amount) {
+        android.graphics.drawable.Drawable icon = view.getBackground();
+        view.setBackgroundTintList(null);
+        view.setBackground(
+            new android.graphics.drawable.LayerDrawable(
+                new android.graphics.drawable.Drawable[] {states, icon}));
+      } else view.setBackground(states);
+    }
+    if (view instanceof ViewGroup) {
+      ViewGroup group = (ViewGroup) view;
+      for (int i = 0; i < group.getChildCount(); i++) roundPlayerControls(group.getChildAt(i));
+    }
+  }
+
+  private void reportPlayback(String state) {
+    if (player == null || playingEntry == null) return;
+    long position = Math.max(0, player.getCurrentPosition()),
+        duration = Math.max(0, player.getDuration());
+    String origin = playingOrigin, secret = playingToken, key = playingEntry.key();
+    JSONObject plan = nativePlan;
+    if (plan != null) {
+      try {
+        JSONObject event =
+            new JSONObject()
+                .put("id", UUID.randomUUID().toString())
+                .put("sequence", ++nativeSequence)
+                .put("index", nativeIndex)
+                .put("state", state)
+                .put("positionMs", position)
+                .put("durationMs", duration);
+        String queueOrigin = prefs().getString("queue-origin", "");
+        JSONObject envelope =
+            new JSONObject()
+                .put("origin", queueOrigin)
+                .put("sessionId", plan.getString("id"))
+                .put("sessionKey", plan.getString("sessionKey"))
+                .put("profileProof", plan.optString("profileProof"))
+                .put("event", event);
+        synchronized (store) {
+          JSONArray pending = store.nativeEvents();
+          if (pending.length() > 0) {
+            JSONObject last = pending.optJSONObject(pending.length() - 1);
+            JSONObject previous = last == null ? null : last.optJSONObject("event");
+            if (previous != null
+                && last.optString("sessionId").equals(envelope.optString("sessionId"))
+                && previous.optInt("index") == nativeIndex
+                && state.equals("playing")
+                && previous.optString("state").equals("playing"))
+              pending.remove(pending.length() - 1);
+          }
+          pending.put(envelope);
+          store.nativeEvents(pending);
+        }
+        progressNetwork.execute(this::flushNativeEvents);
+      } catch (Exception ignored) {
+      }
+    } else {
+      String client = prefs().getString("plex-client-id", "");
+      progressNetwork.execute(
+          () -> {
+            try {
+              String path =
+                  "/:/timeline?type=video&ratingKey="
+                      + PlexAccount.encode(key)
+                      + "&key="
+                      + PlexAccount.encode("/library/metadata/" + key)
+                      + "&state="
+                      + PlexAccount.encode(
+                          Set.of("ended", "error").contains(state) ? "stopped" : state)
+                      + "&time="
+                      + position
+                      + "&duration="
+                      + duration
+                      + "&X-Plex-Client-Identifier="
+                      + PlexAccount.encode(client)
+                      + "&X-Plex-Product=QueuePilot%20TV&X-Plex-Platform=Android";
+              PlexCatalog.get(PlexCatalog.url(origin, path), secret, 1024 * 1024);
+            } catch (Exception ignored) {
+            }
+          });
+    }
+  }
+
+  private void flushNativeEvents() {
+    for (int attempt = 0; attempt < 4000; attempt++) {
+      JSONObject first = null;
+      try {
+        synchronized (store) {
+          JSONArray pending = store.nativeEvents();
+          for (int i = 0; i < pending.length(); i++) {
+            JSONObject candidate = pending.getJSONObject(i);
+            if (!candidate.has("failed")) {
+              first = candidate;
+              break;
+            }
+          }
+          if (first == null) return;
+        }
+        JSONObject event = first.getJSONObject("event");
+        NativeQueueApi.request(
+            first.getString("origin"),
+            "/api/native/sessions/" + first.getString("sessionId") + "/events",
+            event,
+            "X-Native-Session-Key",
+            first.getString("sessionKey"),
+            first.optString("profileProof"));
+        synchronized (store) {
+          JSONArray pending = store.nativeEvents();
+          JSONArray remaining = new JSONArray();
+          for (int i = 0; i < pending.length(); i++) {
+            JSONObject record = pending.getJSONObject(i);
+            if (!record.getJSONObject("event").optString("id").equals(event.getString("id")))
+              remaining.put(record);
+          }
+          store.nativeEvents(remaining);
+        }
+      } catch (Exception error) {
+        if (first != null
+            && error instanceof NativeQueueApi.Failure
+            && Set.of(400, 403, 409).contains(((NativeQueueApi.Failure) error).status)) {
+          try {
+            synchronized (store) {
+              JSONArray pending = store.nativeEvents();
+              for (int i = 0; i < pending.length(); i++) {
+                JSONObject record = pending.getJSONObject(i);
+                if (record.optString("sessionId").equals(first.optString("sessionId")))
+                  record.put("failed", error.getMessage());
+              }
+              store.nativeEvents(pending);
+            }
+          } catch (Exception ignored) {
+          }
+          runOnUiThread(
+              () -> {
+                if (player != null && status != null)
+                  status.setText(
+                      "Some saved history needs review. Its playback session is no longer valid.");
+              });
+          continue;
+        }
+        runOnUiThread(
+            () -> {
+              if (player != null && status != null)
+                status.setText("Progress is saved locally and waiting to sync.");
+            });
+        return;
+      }
+    }
   }
 
   private void message(String title, String text) {
@@ -1481,6 +2267,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void releasePlayer() {
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     if (player != null) {
+      if (!advancing) reportPlayback("stopped");
+      if (mediaSession != null) {
+        mediaSession.release();
+        mediaSession = null;
+      }
       player.release();
       player = null;
     }
@@ -1490,7 +2281,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   @Override
   protected void onStop() {
     super.onStop();
-    if (player != null) player.pause();
+    if (player != null) {
+      reportPlayback("paused");
+      rewind.pause();
+      player.pause();
+    }
   }
 
   @Override
@@ -1499,6 +2294,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     handler.removeCallbacksAndMessages(null);
     releasePlayer();
     network.shutdownNow();
+    progressNetwork.shutdown();
     super.onDestroy();
   }
 }

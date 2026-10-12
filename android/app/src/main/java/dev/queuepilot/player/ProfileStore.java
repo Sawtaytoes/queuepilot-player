@@ -51,6 +51,14 @@ final class ProfileStore {
     writeSecret("account", account.toString());
   }
 
+  JSONArray nativeEvents() throws Exception {
+    return new JSONArray(readSecret("native-events", "[]"));
+  }
+
+  void nativeEvents(JSONArray events) throws Exception {
+    writeSecret("native-events", events.toString());
+  }
+
   private String readSecret(String name, String fallback) throws Exception {
     String value =
         context.getSharedPreferences("secrets", Context.MODE_PRIVATE).getString(name, "");

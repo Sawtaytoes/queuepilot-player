@@ -17,7 +17,10 @@ final class PlexCatalog {
       String children,
       String part,
       String cast,
-      int episode) {
+      int episode,
+      JSONArray roles,
+      long duration,
+      long resume) {
     JSONObject json() throws Exception {
       return new JSONObject()
           .put("key", key)
@@ -27,7 +30,10 @@ final class PlexCatalog {
           .put("children", children)
           .put("part", part)
           .put("cast", cast)
-          .put("episode", episode);
+          .put("episode", episode)
+          .put("roles", roles)
+          .put("duration", duration)
+          .put("resume", resume);
     }
 
     static Entry fromJson(JSONObject j) {
@@ -39,7 +45,10 @@ final class PlexCatalog {
           j.optString("children"),
           j.optString("part"),
           j.optString("cast"),
-          j.optInt("episode"));
+          j.optInt("episode"),
+          j.optJSONArray("roles") == null ? new JSONArray() : j.optJSONArray("roles"),
+          j.optLong("duration"),
+          j.optLong("resume"));
     }
   }
 
@@ -131,12 +140,23 @@ final class PlexCatalog {
                   .put("thumb", attribute(parser, "thumb"))
                   .put("children", children)
                   .put("part", "")
-                  .put("episode", attribute(parser, "index"));
+                  .put("episode", attribute(parser, "index"))
+                  .put("roles", new JSONArray())
+                  .put("duration", attribute(parser, "duration"))
+                  .put("resume", attribute(parser, "viewOffset"));
           itemDepth = parser.getDepth();
           cast.setLength(0);
         } else if (current != null && name.equals("Part") && current.optString("part").isEmpty())
           current.put("part", attribute(parser, "key"));
-        else if (current != null && name.equals("Role")) {
+        else if (current != null
+            && java.util.Set.of("Role", "Director", "Writer", "Producer").contains(name)) {
+          current
+              .getJSONArray("roles")
+              .put(
+                  new JSONObject()
+                      .put("name", attribute(parser, "tag"))
+                      .put("role", name.equals("Role") ? attribute(parser, "role") : name)
+                      .put("thumb", attribute(parser, "thumb")));
           if (cast.length() > 0) cast.append('\n');
           cast.append(attribute(parser, "tag"));
           String role = attribute(parser, "role");

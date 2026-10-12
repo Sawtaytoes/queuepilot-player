@@ -41,11 +41,14 @@ Start an emulator container with the following mounts and settings:
 - The image command `/source/tools/emulator.sh` and no published ports.
 
 After the emulator finishes booting and installs the APK, run the fixture server in that
-same container, then the smoke test:
+same container, then build the emulator-only hierarchy inspector and run the checks:
 
 ```sh
 docker exec -d queuepilot-player-emulator python3 /source/tools/fixture_server.py
+docker exec queuepilot-player-emulator bash /source/tools/ui-inspector/build.sh /fixtures/inspector-build
+docker exec queuepilot-player-emulator adb -s emulator-5554 install -r /fixtures/inspector-build/inspector.apk
 docker exec queuepilot-player-emulator python3 -u /source/tools/smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/native_smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/layout_smoke.py
 ```
 
@@ -77,3 +80,9 @@ Stop the disposable container when testing ends. Recreate it from the canonical 
 for another run; do not keep a running process bound to a worktree that will be removed.
 Hardware-specific HDR, passthrough, rendering buffers, large styled subtitles, real Plex
 Home enrollment, and Roku require separate device evidence.
+
+The standalone inspector reads the accessibility tree without waiting for playback animations
+to become globally idle. It targets its own test package and never restarts the player.
+Install it only in the guarded emulator; it is not part of the viewer APK. Native checks
+cover audience persistence, profile-bound plans, cast faces/roles, D-pad seek focus, three-second
+resume rewind, encrypted offline progress retry, next-item playback and natural completion.

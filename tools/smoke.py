@@ -6,14 +6,12 @@ SERIAL='emulator-5554'
 PACKAGE='dev.queuepilot.player.prototype'
 def adb(*args):return subprocess.check_output(['adb','-s',SERIAL,*args],stderr=subprocess.STDOUT,timeout=30)
 def screen():
-    for attempt in range(4):
-        try:
-            adb('shell','rm','-f','/sdcard/queuepilot-test.xml')
-            result=adb('shell','uiautomator','dump','/sdcard/queuepilot-test.xml')
-            if b'dumped to:' not in result: time.sleep(1);continue
-            return ET.fromstring(adb('shell','cat','/sdcard/queuepilot-test.xml').decode())
-        except (subprocess.CalledProcessError,subprocess.TimeoutExpired):time.sleep(1)
-    raise AssertionError('UI hierarchy was not available')
+    hardware=adb('shell','getprop','ro.hardware').decode().strip()
+    assert hardware in ('ranchu','goldfish'),'Inspector must never target a physical TV'
+    result=adb('shell','am','instrument','-w','-r','dev.queuepilot.inspector/.Dump').decode()
+    match=re.search(r'INSTRUMENTATION_RESULT: xml=(.*)',result)
+    if not match: raise AssertionError('UI hierarchy unavailable: '+result)
+    return ET.fromstring(match.group(1))
 def text():return '\n'.join(n.get('text','') for n in screen().iter('node'))
 def contains(value):
     for i in range(10):
@@ -25,8 +23,8 @@ def click(label):
     width,height=map(int,re.findall(r'(\d+)x(\d+)',adb('shell','wm','size').decode())[-1])
     for attempt in range(6):
         root=screen()
-        node=next((n for n in root.iter('node') if n.get('content-desc','').casefold()==label.casefold()),None)
-        if node is None: node=next((n for n in root.iter('node') if n.get('text','').casefold()==label.casefold()),None)
+        node=next((n for n in root.iter('node') if n.get('content-desc','').casefold()==label.casefold() and n.get('enabled')!='false'),None)
+        if node is None: node=next((n for n in root.iter('node') if n.get('text','').casefold()==label.casefold() and n.get('enabled')!='false'),None)
         if node is not None:
             x1,y1,x2,y2=map(int,re.findall(r'\d+',node.get('bounds')))
             if y2>0 and y1<height:

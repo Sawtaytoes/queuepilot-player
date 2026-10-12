@@ -38,6 +38,15 @@ try {
     }, width);
     await writeFile(resolve(output, filename), Buffer.from(base64, "base64"));
   }
+  for (const [index,name] of ["ada","grace","nadia","omar"].entries()) {
+    const skin=["#d6a383","#c48765","#8c5d46","#b48362"][index];
+    const base64=await page.evaluate(async ({index,skin})=>{
+      const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" fill="${["#446279","#5f4978","#496d69","#635a45"][index]}"/><path d="M60 512Q85 345 256 345Q430 345 452 512" fill="#172a39"/><ellipse cx="256" cy="224" rx="132" ry="162" fill="${skin}"/><path d="M119 210Q110 60 256 48Q405 68 389 202L351 133Q251 181 158 134Z" fill="#202027"/><ellipse cx="207" cy="218" rx="14" ry="10" fill="#202027"/><ellipse cx="302" cy="218" rx="14" ry="10" fill="#202027"/><path d="M208 292Q256 325 307 290" fill="none" stroke="#64392f" stroke-width="10" stroke-linecap="round"/><path d="M252 233L241 265L267 265" fill="none" stroke="#8c5d46" stroke-width="7"/></svg>`;
+      const image=new Image();image.src="data:image/svg+xml;charset=utf-8,"+encodeURIComponent(svg);await image.decode();
+      const canvas=document.createElement("canvas");canvas.width=512;canvas.height=512;canvas.getContext("2d").drawImage(image,0,0);return canvas.toDataURL("image/jpeg",.95).split(",")[1];
+    },{index,skin});
+    await writeFile(resolve(output,name+".jpg"),Buffer.from(base64,"base64"));
+  }
 } finally {
   await browser.close();
 }

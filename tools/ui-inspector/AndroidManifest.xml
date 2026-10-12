@@ -1,0 +1,1 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="dev.queuepilot.inspector"><uses-sdk android:minSdkVersion="26" android:targetSdkVersion="30"/><application android:label="Emulator hierarchy inspector"/><instrumentation android:name="dev.queuepilot.inspector.Dump" android:targetPackage="dev.queuepilot.inspector"/></manifest>
