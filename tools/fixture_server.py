@@ -14,6 +14,7 @@ expire_next = False
 native_events=[]
 native_sessions={}
 native_offline=False
+video_fixture='sample.mp4'
 users = [{'id':1,'uuid':'ada','title':'Ada','protected':False,'admin':True,'thumb':'/avatars/ada.jpg'}, {'id':2,'uuid':'grace','title':'Grace','protected':False,'thumb':'/avatars/grace.jpg'}, {'id':3,'uuid':'morgan','title':'Morgan','protected':True,'thumb':'/avatars/nadia.jpg'}]
 
 class Handler(BaseHTTPRequestHandler):
@@ -22,10 +23,12 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data,str): data=data.encode()
         self.send_response(code); self.send_header('Content-Type',mime); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        global offline, cloud_offline, next_pin, expire_next, native_offline
+        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture
         path=urlparse(self.path).path
         if path=='/_offline': offline=True; self.respond('ok');return
-        if path=='/_online': offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
+        if path=='/_tracks': video_fixture='tracks.mkv';self.respond('ok');return
+        if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
+        if path=='/_online': video_fixture='sample.mp4';offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
         if path=='/_native_reset':native_events.clear();native_sessions.clear();self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
         if path=='/_cloud_offline': cloud_offline=True;self.respond('ok');return
@@ -119,10 +122,10 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/photo/:/transcode':
             width=int(parse_qs(parsed.query).get('width',['240'])[0]);art=parse_qs(parsed.query).get('url',[''])[0];name=art.split('/')[-1] if art in ('/art/nadia.jpg','/art/omar.jpg') else ('high.jpg' if width>240 else 'low.jpg');data=(ROOT/name).read_bytes();self.respond(data,'image/jpeg');return
         if path=='/video/sample.mp4':
-            data=(ROOT/'sample.mp4').read_bytes();start=0;end=len(data)-1;range_header=self.headers.get('Range','')
+            data=(ROOT/video_fixture).read_bytes();start=0;end=len(data)-1;range_header=self.headers.get('Range','')
             if range_header.startswith('bytes='):
                 values=range_header[6:].split('-');start=int(values[0]);end=int(values[1]) if values[1] else end
-            self.send_response(206 if range_header else 200);self.send_header('Content-Type','video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1));
+            self.send_response(206 if range_header else 200);self.send_header('Content-Type','video/x-matroska' if video_fixture.endswith('.mkv') else 'video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1));
             if range_header:self.send_header('Content-Range',f'bytes {start}-{end}/{len(data)}')
             self.end_headers()
             try:self.wfile.write(data[start:end+1])

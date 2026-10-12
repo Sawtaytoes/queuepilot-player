@@ -27,7 +27,11 @@ node tools/generate-fixtures.mjs /absolute/path/to/fixtures
 ```
 
 This creates independently drawn fictional artwork at 240 × 360 and 1440 × 2160,
-and a generated 1280 × 720 H.264/AAC test clip. It uses no library media or photographs.
+and a generated 1280 × 720 H.264/AAC test clip. A second fixture contains two named
+audio tracks and two English subtitle tracks for the actual playback pickers, plus an MP4
+variant whose duplicate names require numbered labels. Regenerate existing fixture folders
+when updating to this version. The build container uses two CPUs, a 6 GiB memory limit and
+at most two Gradle workers. It uses no library media or photographs.
 The fixture server returns Plex-shaped XML, scoped invented tokens, byte-range video
 responses, and a QueuePilot-shaped registry. Its request history deliberately omits tokens.
 
@@ -49,6 +53,7 @@ docker exec queuepilot-player-emulator bash /source/tools/ui-inspector/build.sh 
 docker exec queuepilot-player-emulator adb -s emulator-5554 install -r /fixtures/inspector-build/inspector.apk
 docker exec queuepilot-player-emulator python3 -u /source/tools/smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/native_smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/panels_smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/layout_smoke.py
 ```
 

@@ -49,6 +49,10 @@ The Cast overlay shows available portraits, actor names and roles from Plex meta
 It is the title cast, not scene-by-scene actor recognition. Profiles also show their avatars.
 **Rewind on resume** defaults to three seconds and can be disabled or changed in Settings.
 Player focus highlights are rounded, including the seek buttons with interval labels.
+Options use QueuePilot panels with visible selections and D-pad focus. Browsing/settings
+use a side panel; playback audio, subtitle and speed menus stay above their launching
+controls. Back closes a panel and returns focus; playback controls stay visible while
+a menu is open. The subtitle picker does not add faithful ASS rendering.
 See [native sessions](docs/native-sessions.md).
 
 This preview does not negotiate transcoding, import real story
@@ -81,7 +85,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.4.0.md).
 The repeatable `tools/tv-lab.sh` launcher keeps a named headless Docker lab available
 without involving a household TV; start/status/test/stop commands are documented there.
 

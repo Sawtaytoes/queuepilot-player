@@ -14,6 +14,9 @@ case "$operation" in
     [[ "$source_directory" == /* && "$cache_directory" == /* && "$fixture_directory" == /* ]]
     [[ -f "$source_directory/android/app/build/outputs/apk/debug/app-debug.apk" ]]
     [[ -f "$fixture_directory/sample.mp4" && -f "$fixture_directory/high.jpg" && -f "$fixture_directory/ada.jpg" ]]
+    [[ -f "$fixture_directory/tracks.mkv" && -f "$fixture_directory/tracks.mp4" ]] || {
+      echo 'Regenerate fixtures before testing the playback menus'; exit 1;
+    }
     mkdir -p "$cache_directory/android"
     if docker inspect "$lab_name" >/dev/null 2>&1; then
       owned_lab || { echo 'Refusing to change a container without the lab label'; exit 1; }
@@ -43,10 +46,17 @@ case "$operation" in
     hardware=$(docker exec "$lab_name" adb -s emulator-5554 shell getprop ro.hardware | tr -d '\r')
     [[ "$hardware" == ranchu || "$hardware" == goldfish ]] || { echo 'Refusing a physical-device target'; exit 1; }
     [[ "$(docker exec "$lab_name" adb -s emulator-5554 shell getprop sys.boot_completed | tr -d '\r')" == 1 ]]
+    # Android can report boot complete before emulator.sh finishes installing the viewer.
+    for attempt in $(seq 1 30); do
+      if docker exec "$lab_name" adb -s emulator-5554 shell pm path dev.queuepilot.player.prototype | grep -q '^package:'; then break; fi
+      sleep 1
+    done
+    docker exec "$lab_name" adb -s emulator-5554 shell pm path dev.queuepilot.player.prototype | grep -q '^package:'
     docker exec "$lab_name" bash /source/tools/ui-inspector/build.sh /fixtures/inspector-build
     docker exec "$lab_name" adb -s emulator-5554 install -r /fixtures/inspector-build/inspector.apk
     docker exec "$lab_name" python3 -u /source/tools/smoke.py
     docker exec "$lab_name" python3 -u /source/tools/native_smoke.py
+    docker exec "$lab_name" python3 -u /source/tools/panels_smoke.py
     docker exec "$lab_name" python3 -u /source/tools/layout_smoke.py
     docker exec "$lab_name" python3 -u /source/tools/layout_smoke.py --density-320
     ;;

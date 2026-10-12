@@ -81,4 +81,26 @@ execFileSync("ffmpeg", [
   "-y",
   resolve(output, "sample.mp4"),
 ]);
+// Two named audio tracks and two text tracks exercise the real player pickers.
+await writeFile(resolve(output, "full.srt"), "1\n00:00:00,000 --> 00:00:29,000\nFixture dialogue\n");
+await writeFile(resolve(output, "signs.srt"), "1\n00:00:00,000 --> 00:00:29,000\nFixture sign\n");
+execFileSync("ffmpeg", [
+  "-loglevel", "error", "-i", resolve(output, "sample.mp4"),
+  "-i", resolve(output, "full.srt"), "-i", resolve(output, "signs.srt"),
+  "-map", "0:v", "-map", "0:a", "-map", "0:a", "-map", "1", "-map", "2",
+  "-c:v", "copy", "-c:a", "copy", "-c:s", "srt",
+  "-metadata:s:a:0", "language=jpn", "-metadata:s:a:0", "title=Original stereo",
+  "-metadata:s:a:1", "language=jpn", "-metadata:s:a:1", "title=Commentary",
+  "-metadata:s:s:0", "language=eng", "-metadata:s:s:0", "title=Full subtitles",
+  "-metadata:s:s:1", "language=eng", "-metadata:s:s:1", "title=Signs and songs",
+  "-disposition:a:0", "default", "-disposition:a:1", "0",
+  "-disposition:s:0", "default", "-disposition:s:1", "0",
+  "-y", resolve(output, "tracks.mkv"),
+]);
+// MP4 handler names are not exposed as labels by Media3; retain a duplicate-name case.
+execFileSync("ffmpeg", [
+  "-loglevel", "error", "-i", resolve(output, "tracks.mkv"), "-map", "0",
+  "-c", "copy", "-c:s", "mov_text", "-movflags", "+faststart",
+  "-y", resolve(output, "tracks.mp4"),
+]);
 console.log(output);

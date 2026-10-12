@@ -1,6 +1,5 @@
 package dev.queuepilot.player;
 
-import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
@@ -60,6 +59,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private String playingOrigin = "", playingToken = "";
   private long sectionFloor, sectionEnd = -1;
   private boolean advancing;
+  private final Set<TvPanel> panels = new HashSet<>();
   private final RewindOnResume rewind = new RewindOnResume();
   private JSONObject pendingNativeQueue;
   private String pendingNativeProfile = "";
@@ -184,6 +184,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void reset() {
+    closePanels();
     generation++;
     handler.removeCallbacksAndMessages(null);
     releasePlayer();
@@ -744,8 +745,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       dots.setGravity(Gravity.CENTER);
       form.addView(dots);
       ui.gap(form, 18);
-      AlertDialog dialog =
-          new AlertDialog.Builder(this)
+      TvPanel dialog =
+          panel()
               .setTitle("Unlock " + user.optString("title", "profile"))
               .setMessage("Enter this profile's four-digit Plex Home PIN.")
               .setView(form)
@@ -762,7 +763,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             StringBuilder display = new StringBuilder();
             for (int i = 0; i < 4; i++) display.append(i < pin.length() ? "●  " : "○  ");
             dots.setText(display.toString().trim());
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(pin.length() == 4);
+            dialog.getButton(TvPanel.BUTTON_POSITIVE).setEnabled(pin.length() == 4);
           };
       GridLayout keypad = new GridLayout(this);
       keypad.setColumnCount(3);
@@ -790,10 +791,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       }
       dialog.setOnShowListener(
           v -> {
-            dialog.getWindow().setLayout(dp(440), -2);
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setEnabled(false);
+            dialog.setPanelSize(dp(440), -2);
+            dialog.getButton(TvPanel.BUTTON_POSITIVE).setEnabled(false);
             dialog
-                .getButton(AlertDialog.BUTTON_POSITIVE)
+                .getButton(TvPanel.BUTTON_POSITIVE)
                 .setOnClickListener(
                     view -> {
                       if (pin.length() == 4) {
@@ -1204,14 +1205,14 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void compareArt(PlexCatalog.Entry entry) {
-    AlertDialog dialog =
-        new AlertDialog.Builder(this)
+    TvPanel dialog =
+        panel()
             .setTitle("Artwork quality")
             .setMessage("Loading 240px and 1440px artwork…")
             .setPositiveButton("Close", null)
             .create();
     dialog.show();
-    dialog.getWindow().setLayout(dp(820), dp(550));
+    dialog.setPanelSize(dp(820), dp(550));
     int request = generation;
     String origin = server(), secret = token();
     network.execute(
@@ -1332,6 +1333,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             .build();
     mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);
+    playerView.setShowSubtitleButton(true);
+    installPlaybackMenus();
     roundPlayerControls(playerView);
     rewind.reset();
     playerView.setControllerShowTimeoutMs(3500);
@@ -1442,8 +1445,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
               item.title(),
               "View demo episode",
               () -> {
-                AlertDialog d =
-                    new AlertDialog.Builder(this)
+                TvPanel d =
+                    panel()
                         .setTitle(item.label() + " · " + item.title())
                         .setMessage(
                             "This fictional sequence demonstrates ordering and profile progress. It"
@@ -1459,7 +1462,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                         .setNegativeButton("Back", null)
                         .create();
                 d.show();
-                d.getWindow().setLayout(dp(540), -2);
+                d.setPanelSize(dp(540), -2);
               },
               (mainWidth - 48) / 3));
     focusFirst(row.getChildAt(0));
@@ -1594,8 +1597,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     rows.setPadding(dp(20), dp(12), dp(20), dp(12));
     ScrollView scroll = new ScrollView(this);
     scroll.addView(rows);
-    AlertDialog dialog =
-        new AlertDialog.Builder(this)
+    TvPanel dialog =
+        panel()
             .setTitle("Who are these queues for?")
             .setMessage(
                 "Select people to narrow the queues. This does not change the Plex playback"
@@ -1621,23 +1624,31 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       String id = person.optString("id");
       LinearLayout row = ui.row();
       row.setGravity(Gravity.CENTER_VERTICAL);
+      row.setPadding(dp(10), dp(8), dp(10), dp(8));
       ImageView face = avatar(42);
       loadQueueAvatar(face, id, prefs().getString("queue-origin", ""));
       row.addView(face);
-      CheckBox choice = new CheckBox(this);
-      choice.setText(person.optString("displayName"));
-      choice.setTextColor(TvUi.WHITE);
-      choice.setChecked(selected.contains(id));
-      choice.setOnCheckedChangeListener(
-          (v, checked) -> {
-            if (checked) selected.add(id);
-            else selected.remove(id);
-          });
-      row.addView(choice, new LinearLayout.LayoutParams(0, dp(54), 1));
+      TextView choice = ui.text(person.optString("displayName"), 16, TvUi.WHITE);
+      choice.setPadding(dp(12), 0, dp(8), 0);
+      row.addView(choice, new LinearLayout.LayoutParams(0, -2, 1));
+      TextView check = ui.text(selected.contains(id) ? "✓" : "○", 20, TvUi.ACCENT);
+      check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+      row.addView(check);
+      row.setContentDescription(person.optString("displayName"));
+      row.setStateDescription(selected.contains(id) ? "Selected" : "Not selected");
+      ui.focusable(
+          row,
+          () -> {
+            if (!selected.add(id)) selected.remove(id);
+            check.setText(selected.contains(id) ? "✓" : "○");
+            row.setStateDescription(selected.contains(id) ? "Selected" : "Not selected");
+          },
+          TvUi.PANEL);
       rows.addView(row);
+      ui.gap(rows, 6);
     }
     dialog.show();
-    dialog.getWindow().setLayout(dp(Math.min(600, mainWidth)), -2);
+    dialog.setPanelSize(dp(390), -2);
   }
 
   private void playPendingNative() {
@@ -1659,8 +1670,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         if (required.equals(user.optString("title"))
             || required.equals(user.optString("username"))) {
           if (!userId(user).equals(activeId)) {
-            AlertDialog dialog =
-                new AlertDialog.Builder(this)
+            TvPanel dialog =
+                panel()
                     .setTitle("Play as " + user.optString("title", required))
                     .setMessage("This queue saves watch history to that Plex profile.")
                     .setPositiveButton(
@@ -1673,7 +1684,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     .setNegativeButton("Cancel", null)
                     .create();
             dialog.show();
-            dialog.getWindow().setLayout(dp(460), -2);
+            dialog.setPanelSize(dp(460), -2);
             return;
           }
           break;
@@ -1877,9 +1888,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     input.setHint("https://queues.example.com");
     input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
     input.setText(prefs().getString("queue-origin", ""));
-    form.addView(input, new LinearLayout.LayoutParams(dp(390), dp(54)));
-    AlertDialog d =
-        new AlertDialog.Builder(this)
+    form.addView(input, new LinearLayout.LayoutParams(-1, dp(54)));
+    TvPanel d =
+        panel()
             .setTitle("Connect QueuePilot")
             .setMessage("Enter the address you use to open QueuePilot.")
             .setView(form)
@@ -1888,8 +1899,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             .create();
     d.setOnShowListener(
         v -> {
-          d.getWindow().setLayout(dp(470), -2);
-          d.getButton(AlertDialog.BUTTON_POSITIVE)
+          d.setPanelSize(dp(470), -2);
+          d.getButton(TvPanel.BUTTON_POSITIVE)
               .setOnClickListener(
                   b -> {
                     try {
@@ -1908,7 +1919,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void settings() {
     shell("Settings");
     heading("QueuePilot TV", "Settings");
-    status.setText("Playback preview · 0.3.0");
+    status.setText("Playback preview · 0.4.0");
     LinearLayout row = horizontal();
     row.addView(
         ui.card(
@@ -1935,30 +1946,36 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             () -> navigate(new Screen("profiles")),
             270));
     ui.gap(content, 22);
-    content.addView(
-        ui.button(
-            "Rewind on resume · " + prefs().getInt("rewind-seconds", 3) + " seconds",
-            this::rewindSetting,
-            false));
+    TextView rewindButton = ui.button(rewindLabel(), this::rewindSetting, false);
+    rewindButton.setTag("rewind-setting");
+    content.addView(rewindButton);
     focusFirst(row.getChildAt(0));
+  }
+
+  private String rewindLabel() {
+    int seconds = prefs().getInt("rewind-seconds", 3);
+    return "Rewind on resume · " + (seconds == 0 ? "Off" : seconds + " seconds");
   }
 
   private void rewindSetting() {
     String[] choices = {"Off", "1 second", "3 seconds", "5 seconds", "10 seconds"};
     int[] values = {0, 1, 3, 5, 10};
-    AlertDialog dialog =
-        new AlertDialog.Builder(this)
+    TvPanel dialog =
+        panel()
             .setTitle("Rewind on resume")
+            .setMessage("Replay a little when you continue after pausing.")
+            .setSelected(java.util.Arrays.binarySearch(values, prefs().getInt("rewind-seconds", 3)))
             .setItems(
                 choices,
                 (d, i) -> {
                   prefs().edit().putInt("rewind-seconds", values[i]).apply();
-                  render(new Screen("settings"));
+                  TextView button = getWindow().getDecorView().findViewWithTag("rewind-setting");
+                  if (button != null) button.setText(rewindLabel());
                 })
             .setNegativeButton("Cancel", null)
             .create();
     dialog.show();
-    dialog.getWindow().setLayout(dp(400), -2);
+    dialog.setPanelSize(dp(330), -2);
   }
 
   private ImageView avatar(int size) {
@@ -2074,20 +2091,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       ui.focusable(
           card, () -> message(actor.optString("name"), actor.optString("role")), TvUi.PANEL);
       card.setContentDescription(actor.optString("name") + ". " + actor.optString("role"));
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(140), -2);
+      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(128), -2);
       lp.setMargins(0, 0, dp(15), 0);
       row.addView(card, lp);
     }
-    AlertDialog dialog =
-        new AlertDialog.Builder(this)
+    TvPanel dialog =
+        panel()
             .setTitle("Cast · " + entry.title())
             .setView(scroll)
             .setPositiveButton("Close", null)
             .create();
     dialog.show();
-    dialog
-        .getWindow()
-        .setLayout(dp(680), dp(Math.min(480, 160 + 170 * ((entry.roles().length() + 3) / 4))));
+    dialog.setPanelSize(dp(Math.min(680, 84 + 143 * Math.min(4, entry.roles().length()))), -2);
   }
 
   private void roundPlayerControls(View view) {
@@ -2115,6 +2130,165 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       ViewGroup group = (ViewGroup) view;
       for (int i = 0; i < group.getChildCount(); i++) roundPlayerControls(group.getChildAt(i));
     }
+  }
+
+  private void closePanels() {
+    for (TvPanel panel : new ArrayList<>(panels)) panel.dismiss();
+    panels.clear();
+  }
+
+  private TvPanel.Builder panel() {
+    TvPanel.Builder builder = new TvPanel.Builder(this).setLifecycle(panels::add, panels::remove);
+    if (playerView != null) {
+      View anchor = getCurrentFocus();
+      if (anchor == null || anchor == playerView)
+        anchor = playerView.findViewById(androidx.media3.ui.R.id.exo_settings);
+      return playbackPanel(builder, anchor);
+    }
+    return builder;
+  }
+
+  private TvPanel.Builder playbackPanel(TvPanel.Builder builder, View anchor) {
+    PlayerView controls = playerView;
+    return builder.setAnchor(
+        anchor,
+        () -> {
+          controls.setControllerShowTimeoutMs(0);
+          controls.showController();
+        },
+        () -> {
+          if (playerView == controls && panels.isEmpty()) {
+            controls.setControllerShowTimeoutMs(3500);
+            controls.showController();
+          }
+        });
+  }
+
+  private TvPanel.Builder playbackPanel(View anchor) {
+    return playbackPanel(
+        new TvPanel.Builder(this).setLifecycle(panels::add, panels::remove), anchor);
+  }
+
+  private void installPlaybackMenus() {
+    bindPlaybackMenu(androidx.media3.ui.R.id.exo_settings, this::playbackOptions);
+    bindPlaybackMenu(
+        androidx.media3.ui.R.id.exo_subtitle,
+        anchor -> trackOptions(anchor, androidx.media3.common.C.TRACK_TYPE_TEXT));
+    bindPlaybackMenu(
+        androidx.media3.ui.R.id.exo_audio_track,
+        anchor -> trackOptions(anchor, androidx.media3.common.C.TRACK_TYPE_AUDIO));
+    bindPlaybackMenu(androidx.media3.ui.R.id.exo_playback_speed, this::speedOptions);
+  }
+
+  private void bindPlaybackMenu(int id, java.util.function.Consumer<View> open) {
+    View control = playerView.findViewById(id);
+    if (control == null) return;
+    control.setOnClickListener(
+        view -> {
+          view.requestFocusFromTouch();
+          open.accept(view);
+        });
+  }
+
+  private void playbackOptions(View anchor) {
+    if (player == null) return;
+    playbackPanel(anchor)
+        .setTitle("Playback")
+        .setItems(
+            new String[] {"Audio", "Subtitles", "Playback speed"},
+            (d, index) -> {
+              if (index == 2) speedOptions(anchor);
+              else
+                trackOptions(
+                    anchor,
+                    index == 0
+                        ? androidx.media3.common.C.TRACK_TYPE_AUDIO
+                        : androidx.media3.common.C.TRACK_TYPE_TEXT);
+            })
+        .setNegativeButton("Close", null)
+        .create()
+        .show();
+  }
+
+  private void speedOptions(View anchor) {
+    if (player == null) return;
+    ExoPlayer target = player;
+    float[] speeds = {.5f, .75f, 1f, 1.25f, 1.5f, 2f};
+    String[] labels = {"0.5×", "0.75×", "Normal · 1×", "1.25×", "1.5×", "2×"};
+    int selected = -1;
+    for (int i = 0; i < speeds.length; i++)
+      if (Math.abs(target.getPlaybackParameters().speed - speeds[i]) < .001f) selected = i;
+    playbackPanel(anchor)
+        .setTitle("Playback speed")
+        .setSelected(selected)
+        .setItems(
+            labels,
+            (d, i) -> {
+              if (player == target) target.setPlaybackSpeed(speeds[i]);
+            })
+        .setNegativeButton("Back", (d, i) -> playbackOptions(anchor))
+        .create()
+        .show();
+  }
+
+  private void trackOptions(View anchor, int type) {
+    if (player == null) return;
+    ExoPlayer target = player;
+    boolean text = type == androidx.media3.common.C.TRACK_TYPE_TEXT;
+    List<String> labels = new ArrayList<>();
+    List<androidx.media3.common.TrackSelectionOverride> overrides = new ArrayList<>();
+    labels.add(text ? "Off" : "Automatic");
+    overrides.add(null);
+    int selected = 0;
+    boolean disabled = target.getTrackSelectionParameters().disabledTrackTypes.contains(type);
+    boolean automatic =
+        !text
+            && target.getTrackSelectionParameters().overrides.values().stream()
+                .noneMatch(override -> override.getType() == type);
+    androidx.media3.ui.DefaultTrackNameProvider names =
+        new androidx.media3.ui.DefaultTrackNameProvider(getResources());
+    for (androidx.media3.common.Tracks.Group group : target.getCurrentTracks().getGroups()) {
+      if (group.getType() != type) continue;
+      for (int i = 0; i < group.length; i++) {
+        if (!group.isTrackSupported(i)) continue;
+        androidx.media3.common.Format format = group.getTrackFormat(i);
+        String name = names.getTrackName(format);
+        if (format.label != null && !name.contains(format.label)) name += " · " + format.label;
+        labels.add(name);
+        overrides.add(
+            new androidx.media3.common.TrackSelectionOverride(group.getMediaTrackGroup(), i));
+        if (!disabled && !automatic && group.isTrackSelected(i)) selected = labels.size() - 1;
+      }
+    }
+    // Containers do not always expose track titles; never show indistinguishable rows.
+    Map<String, Integer> counts = new HashMap<>();
+    for (String label : labels) counts.merge(label, 1, Integer::sum);
+    for (int i = 1; i < labels.size(); i++) {
+      String label = labels.get(i);
+      if (counts.get(label) > 1) labels.set(i, label + " · Track " + i);
+    }
+    TvPanel.Builder builder =
+        playbackPanel(anchor)
+            .setTitle(text ? "Subtitles" : "Audio")
+            .setSelected(selected)
+            .setItems(
+                labels.toArray(new String[0]),
+                (d, i) -> {
+                  if (player != target) return;
+                  androidx.media3.common.TrackSelectionParameters.Builder parameters =
+                      target
+                          .getTrackSelectionParameters()
+                          .buildUpon()
+                          .clearOverridesOfType(type)
+                          .setTrackTypeDisabled(type, text && i == 0);
+                  if (i > 0) parameters.setOverrideForType(overrides.get(i));
+                  target.setTrackSelectionParameters(parameters.build());
+                })
+            .setNegativeButton("Back", (d, i) -> playbackOptions(anchor));
+    if (labels.size() == 1)
+      builder.setMessage(
+          text ? "No subtitle tracks in this video." : "No selectable audio tracks in this video.");
+    builder.create().show();
   }
 
   private void reportPlayback(String state) {
@@ -2254,14 +2428,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void message(String title, String text) {
-    AlertDialog d =
-        new AlertDialog.Builder(this)
-            .setTitle(title)
-            .setMessage(text)
-            .setPositiveButton("Close", null)
-            .create();
+    TvPanel d = panel().setTitle(title).setMessage(text).setPositiveButton("Close", null).create();
     d.show();
-    d.getWindow().setLayout(dp(560), -2);
+    d.setPanelSize(dp(360), -2);
   }
 
   private void releasePlayer() {
@@ -2290,6 +2459,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   @Override
   protected void onDestroy() {
+    closePanels();
     generation++;
     handler.removeCallbacksAndMessages(null);
     releasePlayer();
