@@ -1324,12 +1324,14 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.action(actions, "Back to title", this::back, false);
     root.addView(overlay, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     setContentView(root);
+    AssPlayback ass = new AssPlayback(this);
+    playerView.getOverlayFrameLayout().addView(ass.overlay, new FrameLayout.LayoutParams(-1, -1));
     player =
-        new ExoPlayer.Builder(this)
+        new ExoPlayer.Builder(this, ass.renderers(this))
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(
                     PlexDataSource.factory(
-                        playingOrigin.isEmpty() ? server() : playingOrigin, secret)))
+                        playingOrigin.isEmpty() ? server() : playingOrigin, secret), ass.extractors()))
             .build();
     mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);
@@ -1345,6 +1347,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         new Player.Listener() {
           @Override
           public void onVideoSizeChanged(VideoSize size) {
+            ass.videoSize(Math.round(size.width * size.pixelWidthHeightRatio), size.height);
             status.setText("Decoded video: " + size.width + " × " + size.height);
           }
 
