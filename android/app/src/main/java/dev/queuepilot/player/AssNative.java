@@ -11,7 +11,7 @@ final class AssNative {
 
   static native void destroy(long handle);
 
-  static native void font(long handle, String name, byte[] bytes);
+  static native void font(long handle, String name, String path);
 
   static native void header(long handle, byte[] bytes);
 

@@ -16,7 +16,9 @@ width,height,density=(os.environ[key] for key in ('TV_WIDTH','TV_HEIGHT','TV_DEN
 values.update({'hw.lcd.width':width,'hw.lcd.height':height,'hw.lcd.density':density,'hw.initialOrientation':'landscape','skin.name':width+'x'+height,'skin.path':width+'x'+height,'hw.keyboard':'yes'})
 path.write_text(''.join(f'{key}={value}\n' for key,value in values.items()))
 PYAVD
+rm -f /cache/adb-ready
 adb start-server
+touch /cache/adb-ready
 emulator -avd queuepilot-tv -read-only -skin "${TV_WIDTH}x${TV_HEIGHT}" -wipe-data -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot -memory 4096 -cores 4 > /cache/emulator.log 2>&1 &
 emulator_pid=$!
 trap 'kill "$emulator_pid" 2>/dev/null || true' EXIT

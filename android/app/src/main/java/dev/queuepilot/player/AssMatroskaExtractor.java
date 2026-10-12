@@ -4,6 +4,8 @@ import androidx.media3.common.ParserException;
 import androidx.media3.extractor.ExtractorInput;
 import androidx.media3.extractor.mkv.MatroskaExtractor;
 import androidx.media3.extractor.text.SubtitleParser;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.IOException;
 
 /** Uses the public EBML extension hooks; no reflection or Media3 fork. */
@@ -11,7 +13,7 @@ import java.io.IOException;
 final class AssMatroskaExtractor extends MatroskaExtractor {
   private final AssFonts fonts;
   private String filename = "", mime = "";
-  private byte[] attachment;
+  private File attachment;
 
   AssMatroskaExtractor(SubtitleParser.Factory parsers, AssFonts fonts) {
     super(parsers);
@@ -55,8 +57,16 @@ final class AssMatroskaExtractor extends MatroskaExtractor {
       input.skipFully(size);
       return;
     }
-    attachment = new byte[size];
-    input.readFully(attachment, 0, size);
+    attachment = fonts.temporary();
+    try (FileOutputStream output = new FileOutputStream(attachment)) {
+      byte[] chunk = new byte[64 * 1024];
+      for (int remaining = size; remaining > 0; ) {
+        int count = Math.min(remaining, chunk.length);
+        input.readFully(chunk, 0, count);
+        output.write(chunk, 0, count);
+        remaining -= count;
+      }
+    }
   }
 
   @Override

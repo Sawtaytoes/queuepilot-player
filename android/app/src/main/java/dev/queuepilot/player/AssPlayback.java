@@ -20,25 +20,36 @@ import java.util.Map;
 
 @androidx.media3.common.util.UnstableApi
 final class AssPlayback {
-  final AssFonts fonts = new AssFonts();
+  final AssFonts fonts;
   final AssOverlay overlay;
   private AssRenderer renderer;
   private int videoWidth = 1920, videoHeight = 1080;
 
   AssPlayback(Context context) {
+    fonts = new AssFonts(context);
     overlay = new AssOverlay(context);
-    overlay.addOnLayoutChangeListener((view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> updateViewport());
+    overlay.addOnLayoutChangeListener(
+        (view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom) -> updateViewport());
+  }
+
+  void close() {
+    fonts.close();
   }
 
   void videoSize(int width, int height) {
     if (width <= 0 || height <= 0) return;
-    videoWidth = width; videoHeight = height; updateViewport();
+    videoWidth = width;
+    videoHeight = height;
+    updateViewport();
   }
 
   private void updateViewport() {
     if (renderer == null || overlay.getWidth() == 0 || overlay.getHeight() == 0) return;
-    float scale = Math.min((float)overlay.getWidth()/videoWidth, (float)overlay.getHeight()/videoHeight);
-    renderer.videoSize(Math.max(1, Math.round(videoWidth*scale)), Math.max(1, Math.round(videoHeight*scale)));
+    float scale =
+        Math.min(
+            (float) overlay.getWidth() / videoWidth, (float) overlay.getHeight() / videoHeight);
+    renderer.videoSize(
+        Math.max(1, Math.round(videoWidth * scale)), Math.max(1, Math.round(videoHeight * scale)));
   }
 
   DefaultRenderersFactory renderers(Context context) {

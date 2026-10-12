@@ -14,7 +14,7 @@ def choose(fragment):
     s.click(node.get('content-desc'))
 
 assert s.adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
-s.post('_ass');s.launch()
+s.post('_online');s.post('_ass');s.adb('shell','pm','clear',s.PACKAGE);s.adb('logcat','-c');s.launch()
 if 'Sign in with Plex' in s.text():
     s.click('Sign in with Plex');s.contains('ABCD');s.post('_claim');s.contains("Who's watching?");s.click('Ada');s.contains('What are we watching?')
 s.click('Home');s.click('Series');s.click('Series');s.click('Orbit Nine');s.click('Season 1');s.click('The signal');s.click('Play')

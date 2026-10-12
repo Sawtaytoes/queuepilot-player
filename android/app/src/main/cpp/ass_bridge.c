@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 typedef struct {
     ASS_Library *library;
@@ -41,16 +42,25 @@ JNIEXPORT jlong JNICALL JNI(create)(JNIEnv *env, jclass type) {
     return (jlong)(intptr_t)ctx;
 }
 JNIEXPORT void JNICALL JNI(destroy)(JNIEnv *env, jclass type, jlong handle) { destroy(context(handle)); }
-JNIEXPORT void JNICALL JNI(font)(JNIEnv *env, jclass type, jlong handle, jstring name, jbyteArray bytes) {
+JNIEXPORT void JNICALL JNI(font)(JNIEnv *env, jclass type, jlong handle, jstring name, jstring path) {
     Context *ctx = context(handle);
     const char *font_name = (*env)->GetStringUTFChars(env, name, NULL);
-    jbyte *data = (*env)->GetByteArrayElements(env, bytes, NULL);
-    if (font_name && data) {
-        ass_add_font(ctx->library, font_name, (char *)data, (*env)->GetArrayLength(env, bytes));
-        ass_set_fonts(ctx->renderer, "/system/fonts/Roboto-Regular.ttf", "sans-serif", ASS_FONTPROVIDER_NONE, NULL, 1);
-        ctx->force = 1;
+    const char *filename = (*env)->GetStringUTFChars(env, path, NULL);
+    FILE *file = filename ? fopen(filename, "rb") : NULL;
+    if (file && font_name && fseek(file, 0, SEEK_END) == 0) {
+        long length = ftell(file);
+        if (length > 0 && length <= 32 * 1024 * 1024 && fseek(file, 0, SEEK_SET) == 0) {
+            char *data = malloc(length);
+            if (data && fread(data, 1, length, file) == (size_t)length) {
+                ass_add_font(ctx->library, font_name, data, length);
+                ass_set_fonts(ctx->renderer, "/system/fonts/Roboto-Regular.ttf", "sans-serif", ASS_FONTPROVIDER_NONE, NULL, 1);
+                ctx->force = 1;
+            }
+            free(data);
+        }
     }
-    if (data) (*env)->ReleaseByteArrayElements(env, bytes, data, JNI_ABORT);
+    if (file) fclose(file);
+    if (filename) (*env)->ReleaseStringUTFChars(env, path, filename);
     if (font_name) (*env)->ReleaseStringUTFChars(env, name, font_name);
 }
 JNIEXPORT void JNICALL JNI(header)(JNIEnv *env, jclass type, jlong handle, jbyteArray bytes) {

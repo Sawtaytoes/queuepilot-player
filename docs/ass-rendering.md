@@ -14,9 +14,10 @@ other containers and external ASS downloads are not covered by this integration.
 Track changes replace the libass track. Seeks invalidate stale output and pending
 packets while retaining decoded events, so a long sign can survive a seek inside
 its duration; libass handles the playback clock moving backwards. Subtitle
-Off releases the renderer's track and clears the overlay. Font data is scoped to one
-playback session, not installed globally. Attachments are limited to 128 fonts,
-16 MiB per font and 96 MiB total. Events older than sixty seconds are pruned. A stream
+Off releases the renderer's track and clears the overlay. Font data is streamed into private per-playback cache files and removed on release,
+not held as large Java arrays or installed globally. Attachments are limited to 128 fonts,
+32 MiB per font and 96 MiB total. Media3 buffering targets 32 MiB and prioritizes that
+size limit, leaving Java-heap headroom on constrained TV devices. Events older than sixty seconds are pruned. A stream
 with fonts placed after video clusters may initially use the fallback font until its
 attachments are encountered; this implementation does not scan a second copy of the
 movie for late attachments.

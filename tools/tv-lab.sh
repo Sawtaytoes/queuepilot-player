@@ -18,6 +18,7 @@ case "$operation" in
       echo 'Regenerate fixtures before testing the playback menus'; exit 1;
     }
     mkdir -p "$cache_directory/android"
+    if ! docker inspect "$lab_name" --format '{{.State.Running}}' 2>/dev/null | grep -q true; then rm -f "$cache_directory/adb-ready"; fi
     if docker inspect "$lab_name" >/dev/null 2>&1; then
       owned_lab || { echo 'Refusing to change a container without the lab label'; exit 1; }
       mounted_source=$(docker inspect "$lab_name" --format '{{range .Mounts}}{{if eq .Destination "/source"}}{{.Source}}{{end}}{{end}}')
@@ -32,7 +33,15 @@ case "$operation" in
         --mount "type=bind,src=$fixture_directory,dst=/fixtures" \
         queuepilot-player-build:0.1 bash /source/tools/lab-entrypoint.sh
     fi
-    echo 'Lab starting. Use status until Android reports boot_completed=1, then test.'
+    # The entrypoint owns ADB startup. A concurrent `adb getprop` can race its
+    # daemon bind and terminate the lab before the emulator is launched.
+    for attempt in $(seq 1 60); do
+      if docker exec "$lab_name" bash -c 'test -f /cache/adb-ready'; then break; fi
+      [[ "$(docker inspect "$lab_name" --format '{{.State.Running}}')" == true ]] || { docker logs --tail 20 "$lab_name"; exit 1; }
+      sleep 1
+    done
+    docker exec "$lab_name" test -f /cache/adb-ready
+    echo 'ADB ready. Use status until Android reports boot_completed=1, then test.'
     ;;
   status)
     owned_lab || { echo 'No owned TV lab is configured'; exit 1; }

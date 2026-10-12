@@ -45,6 +45,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private LinearLayout content;
   private TextView status;
   private ExoPlayer player;
+  private AssPlayback assPlayback;
   private PlayerView playerView;
   private androidx.media3.session.MediaSession mediaSession;
   private volatile int generation;
@@ -1325,9 +1326,15 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     root.addView(overlay, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     setContentView(root);
     AssPlayback ass = new AssPlayback(this);
+    assPlayback = ass;
     playerView.getOverlayFrameLayout().addView(ass.overlay, new FrameLayout.LayoutParams(-1, -1));
     player =
         new ExoPlayer.Builder(this, ass.renderers(this))
+            .setLoadControl(
+                new androidx.media3.exoplayer.DefaultLoadControl.Builder()
+                    .setTargetBufferBytes(32 * 1024 * 1024)
+                    .setPrioritizeTimeOverSizeThresholds(false)
+                    .build())
             .setMediaSourceFactory(
                 new DefaultMediaSourceFactory(
                     PlexDataSource.factory(
@@ -2447,6 +2454,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       }
       player.release();
       player = null;
+    }
+    if (assPlayback != null) {
+      assPlayback.close();
+      assPlayback = null;
     }
     playerView = null;
   }

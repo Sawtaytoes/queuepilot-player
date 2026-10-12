@@ -109,7 +109,8 @@ final class AssRenderer extends BaseRenderer {
         .snapshot()
         .forEach(
             (name, bytes) -> {
-              if (loadedFonts.add(name)) AssNative.font(nativeHandle, name, bytes);
+              if (loadedFonts.add(name))
+                AssNative.font(nativeHandle, name, bytes.getAbsolutePath());
             });
   }
 
@@ -118,8 +119,14 @@ final class AssRenderer extends BaseRenderer {
     // libass handles time moving backwards. Retain already-decoded, still-active events:
     // a long sign can start before the container's video seek point.
     int revision = ++generation;
-    pending = false; ended = false; input.clear(); lastFrameUs = C.TIME_UNSET;
-    main.post(() -> { if (revision == generation) overlay.clear(); });
+    pending = false;
+    ended = false;
+    input.clear();
+    lastFrameUs = C.TIME_UNSET;
+    main.post(
+        () -> {
+          if (revision == generation) overlay.clear();
+        });
   }
 
   @Override
