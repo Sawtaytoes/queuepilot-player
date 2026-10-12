@@ -11,10 +11,14 @@ Embedded fonts, style outlines, positioned signs, vector drawings and animation 
 interpreted by libass. Other subtitle formats retain Media3's existing path. ASS in
 other containers and external ASS downloads are not covered by this integration.
 
-Track changes replace the libass track. Seeks invalidate stale output and pending
-packets while retaining decoded events, so a long sign can survive a seek inside
-its duration; libass handles the playback clock moving backwards. Subtitle
-Off releases the renderer's track and clears the overlay. Font data is streamed into private per-playback cache files and removed on release,
+Changing between different ASS tracks replaces the libass track. Seeks invalidate stale
+output while retaining decoded events, so a long sign can survive a seek inside its
+duration. Off and temporary selection of a plain-text track clear the overlay while
+retaining the last ASS track until playback ends. Matroska seeks with ASS use five
+seconds of pre-roll without changing the requested playback time, recovering short
+cues that start before the video keyframe. A previously unseen cue beginning more than
+five seconds before a fresh seek can still be missing: full subtitle indexing remains
+a limitation. Font data is streamed into private per-playback cache files and removed on release,
 not held as large Java arrays or installed globally. Attachments are limited to 128 fonts,
 32 MiB per font and 96 MiB total. Media3 buffering targets 32 MiB and prioritizes that
 size limit, leaving Java-heap headroom on constrained TV devices. Events older than sixty seconds are pruned. A stream
@@ -47,6 +51,7 @@ texts are packaged in the APK. Keep the pinned source archives and per-ABI objec
 with release artifacts so recipients can rebuild/relink the LGPL component. The app's
 original Java/C code remains MIT; third-party code retains its own terms.
 
+Fixture generation requires FFmpeg and MKVToolNix (`mkvmerge`); pixel checks use Pillow.
 The synthetic fixture uses ABeeZee by Anja Meiners from the Google Fonts project,
 under the included SIL Open Font License. It exercises an attached font, authored
 outline, rotated positioned sign and animated movement without private media.

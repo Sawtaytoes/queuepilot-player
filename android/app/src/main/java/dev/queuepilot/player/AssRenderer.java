@@ -33,10 +33,15 @@ final class AssRenderer extends BaseRenderer {
   private Handler worker;
   private Format format;
   private long nativeHandle;
+  private Bitmap cachedBitmap;
+  private int[] cachedRectangle;
+  private int cachedWidth, cachedHeight, displayedGeneration = -1;
   private boolean pending, ended;
   private volatile int generation;
+  private volatile boolean frameDirty = true;
   private volatile int width = 1920, height = 1080;
   private long lastFrameUs = C.TIME_UNSET;
+  private int seekSamples;
 
   AssRenderer(AssFonts fonts, AssOverlay overlay) {
     super(C.TRACK_TYPE_TEXT);
@@ -78,8 +83,14 @@ final class AssRenderer extends BaseRenderer {
   @Override
   protected void onStreamChanged(
       Format[] formats, long start, long offset, MediaSource.MediaPeriodId period) {
-    format = formats[0];
-    resetTrack();
+    Format next = formats[0];
+    boolean same =
+        format != null
+            && java.util.Objects.equals(format.id, next.id)
+            && java.util.Arrays.equals(
+                format.initializationData.get(1), next.initializationData.get(1));
+    format = next;
+    if (!same) resetTrack();
   }
 
   private void resetTrack() {
@@ -88,6 +99,7 @@ final class AssRenderer extends BaseRenderer {
     ended = false;
     input.clear();
     lastFrameUs = C.TIME_UNSET;
+    frameDirty = true;
     Format selected = format;
     main.post(
         () -> {
@@ -97,6 +109,9 @@ final class AssRenderer extends BaseRenderer {
         () -> {
           if (nativeHandle != 0) AssNative.destroy(nativeHandle);
           nativeHandle = AssNative.create();
+          cachedBitmap = null;
+          cachedRectangle = null;
+          displayedGeneration = -1;
           loadedFonts.clear();
           if (nativeHandle == 0) return;
           installFonts();
@@ -116,6 +131,8 @@ final class AssRenderer extends BaseRenderer {
 
   @Override
   protected void onPositionReset(long position, boolean joining, boolean resetToKeyframe) {
+    seekSamples = 0;
+    android.util.Log.d("QueuePilotLibass", "Subtitle seek=" + position / 1000);
     // libass handles time moving backwards. Retain already-decoded, still-active events:
     // a long sign can start before the container's video seek point.
     int revision = ++generation;
@@ -153,6 +170,7 @@ final class AssRenderer extends BaseRenderer {
       input.data.get(bytes);
       pending = false;
       long timeMs = input.timeUs / 1000;
+      if (seekSamples++ < 3) android.util.Log.d("QueuePilotLibass", "Subtitle sample=" + timeMs);
       queuedBytes.addAndGet(bytes.length);
       worker.post(
           () -> {
@@ -160,6 +178,7 @@ final class AssRenderer extends BaseRenderer {
               if (revision != generation || nativeHandle == 0) return;
               AssPacket packet = AssPacket.decode(bytes);
               AssNative.packet(nativeHandle, packet.data, timeMs, packet.durationMs);
+              frameDirty = true;
             } catch (IllegalArgumentException | ArithmeticException ignored) {
               /* Malformed subtitle must not stop video. */
             } finally {
@@ -167,7 +186,8 @@ final class AssRenderer extends BaseRenderer {
             }
           });
     }
-    if (lastFrameUs != C.TIME_UNSET && Math.abs(positionUs - lastFrameUs) < 30000L) return;
+    if (!frameDirty && lastFrameUs != C.TIME_UNSET && Math.abs(positionUs - lastFrameUs) < 30000L)
+      return;
     if (!rendering.compareAndSet(false, true)) return;
     lastFrameUs = positionUs;
     int renderWidth = width, renderHeight = height;
@@ -176,15 +196,24 @@ final class AssRenderer extends BaseRenderer {
           try {
             if (revision != generation || nativeHandle == 0) return;
             installFonts();
+            frameDirty = false;
             int[] rectangle = new int[4];
             Bitmap bitmap =
                 AssNative.render(
                     nativeHandle, positionUs / 1000, renderWidth, renderHeight, rectangle);
-            if (rectangle[0] == -2) return; // unchanged
+            if (rectangle[0] != -2) {
+              cachedBitmap = bitmap;
+              cachedRectangle = rectangle;
+              cachedWidth = renderWidth;
+              cachedHeight = renderHeight;
+            } else if (displayedGeneration == revision || cachedRectangle == null) return;
+            Bitmap frame = cachedBitmap;
+            int[] bounds = cachedRectangle;
+            int frameWidth = cachedWidth, frameHeight = cachedHeight;
+            displayedGeneration = revision;
             main.post(
                 () -> {
-                  if (revision == generation)
-                    overlay.frame(bitmap, rectangle, renderWidth, renderHeight);
+                  if (revision == generation) overlay.frame(frame, bounds, frameWidth, frameHeight);
                 });
           } finally {
             rendering.set(false);
@@ -206,22 +235,23 @@ final class AssRenderer extends BaseRenderer {
   protected void onDisabled() {
     ++generation;
     main.post(overlay::clear);
-    worker.post(
-        () -> {
-          if (nativeHandle != 0) AssNative.destroy(nativeHandle);
-          nativeHandle = 0;
-          loadedFonts.clear();
-        });
+    // Keep active events for Off -> On or plain-text -> ASS. Media3 may reset
+    // a disabled renderer and its sample queue can retain only the last overlap.
+    // The native state stays bounded and belongs to this playback session.
   }
 
   @Override
   protected void onRelease() {
-    onReset();
-  }
-
-  @Override
-  protected void onReset() {
+    ++generation;
+    main.post(overlay::clear);
     if (thread != null) {
+      worker.post(
+          () -> {
+            if (nativeHandle != 0) AssNative.destroy(nativeHandle);
+            nativeHandle = 0;
+            cachedBitmap = null;
+            cachedRectangle = null;
+          });
       thread.quitSafely();
       thread = null;
       worker = null;

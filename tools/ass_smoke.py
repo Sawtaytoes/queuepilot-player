@@ -9,6 +9,9 @@ def gear():
     node=next(n for n in s.screen().iter('node') if n.get('resource-id','').endswith('/exo_settings'))
     x,y,right,bottom=map(int,re.findall(r'\d+',node.get('bounds')))
     s.adb('shell','input','tap',str((x+right)//2),str((y+bottom)//2));s.click('Subtitles')
+def hide_controls():
+    if any(n.get('resource-id','').endswith('/exo_settings') for n in s.screen().iter('node')):
+        s.adb('shell','input','tap','1800','300');time.sleep(.3)
 def choose(fragment):
     node=next(n for n in s.screen().iter('node') if fragment in n.get('content-desc',''))
     s.click(node.get('content-desc'))
@@ -25,8 +28,10 @@ assert 'fontselect' in logs,logs
 key(127);gear();choose('Authored ASS')
 key(126);time.sleep(4);s.shot('ass-selected')
 gear();s.click('Off');time.sleep(4);s.shot('ass-off')
-gear();choose('Plain text');time.sleep(1)
-gear();choose('Authored ASS');key(89);key(126);time.sleep(4);s.shot('ass-after-seek')
+key(127);gear();choose('Plain text');time.sleep(1)
+gear();choose('Authored ASS');time.sleep(4);hide_controls();s.shot('ass-reenabled-paused')
+key(89);time.sleep(4);hide_controls();s.shot('ass-seek-paused')
+key(126);time.sleep(4);s.shot('ass-after-seek')
 assert 'FATAL EXCEPTION' not in s.adb('logcat','-d','-b','crash').decode()
 s.back();s.post('_online')
 print('PASS: embedded font selected, authored ASS track, subtitle Off, SRT/ASS switching, backward seek; pixel comparison required on host')

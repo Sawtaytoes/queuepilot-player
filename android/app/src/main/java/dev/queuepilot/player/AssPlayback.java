@@ -91,7 +91,7 @@ final class AssPlayback {
       private Extractor[] replace(Extractor[] extractors) {
         for (int index = 0; index < extractors.length; index++)
           if (extractors[index] instanceof MatroskaExtractor)
-            extractors[index] = new AssMatroskaExtractor(parsers, fonts);
+            extractors[index] = new AssPrerollExtractor(new AssMatroskaExtractor(parsers, fonts));
         return extractors;
       }
 

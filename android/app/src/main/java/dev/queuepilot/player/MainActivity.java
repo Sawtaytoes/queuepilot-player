@@ -2444,6 +2444,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     d.setPanelSize(dp(360), -2);
   }
 
+  @Override
+  public boolean onKeyDown(int keyCode, KeyEvent event) {
+    // Keep foreground media keys with the visible player, including when Cast or
+    // another overlay owns focus. Shield's legacy session fallback can supply
+    // an empty controller package for injected media keys.
+    if (playerView != null && playerView.dispatchMediaKeyEvent(event)) return true;
+    return super.onKeyDown(keyCode, event);
+  }
+
+  @Override
+  public boolean onKeyUp(int keyCode, KeyEvent event) {
+    if (playerView != null && playerView.dispatchMediaKeyEvent(event)) return true;
+    return super.onKeyUp(keyCode, event);
+  }
+
   private void releasePlayer() {
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     if (player != null) {
