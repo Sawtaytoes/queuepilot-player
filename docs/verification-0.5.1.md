@@ -9,7 +9,9 @@ all overlapping layers and cues already pruned from the native renderer.
 
 All 22 unit tests, Android lint and APK assembly passed. Index tests cover overlaps,
 exclusive end times, track isolation, missing CueDuration recovered from BlockDuration,
-raw ASS overrides and commas, and malformed/truncated blocks.
+raw ASS overrides and commas, and malformed/truncated blocks. The full emulator
+regression passed: sign-in/profile/cache, native queues and history, and control-anchored
+menus and native layouts at 240 and 320 dpi.
 
 The visual fixture cold-resumes at 60 seconds, inside cues beginning at 0, 20 and 30
 seconds. It then seeks beyond the two shorter cues' expiry plus the native retention
