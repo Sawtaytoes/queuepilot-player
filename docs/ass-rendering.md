@@ -57,3 +57,9 @@ independent FFmpeg/libass reference. On a physical device compare the selected r
 ASS track at the same timestamp to a known-good player, including seeking, Off/On and
 an effects-heavy scene. A successful video start or readable plain text is insufficient.
 Device evidence is recorded separately; do not infer fidelity from compilation.
+
+For releases, `tools/package-native-source.sh <checkout> <build-cache> <archive>` packages
+this source tree, the exact upstream archives, and per-ABI object/static-library files
+needed to relink the native bridge. Distribute that archive beside the APK. The link
+command is in `tools/native-build.sh`; use the pinned NDK, replace the chosen component,
+relink `libqueuepilot_ass.so`, and rebuild/re-sign the APK with a local Android signing key.

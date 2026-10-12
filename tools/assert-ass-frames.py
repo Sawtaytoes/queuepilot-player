@@ -12,6 +12,14 @@ def blue(image):
     return sum(1 for r,g,b in pixels if b>60 and b>r*1.5+10 and b>g*1.5+10)
 def green(image):
     return sum(1 for r,g,b in image.crop((100,130,850,400)).getdata() if g>100 and g>r*1.5 and g>b*1.5)
+def moving_center(image):
+    crop=image.crop((0,360,1920,480))
+    points=[index % 1920 for index,(r,g,b) in enumerate(crop.getdata()) if g>100 and g>r*1.5 and g>b*1.5]
+    assert len(points)>300,'Animated sign missing'
+    return sum(points)/len(points)
+first=moving_center(Image.open(root/'ass-authored.png').convert('RGB'))
+second=moving_center(Image.open(root/'ass-moving.png').convert('RGB'))
+assert second-first>5,('Animated sign did not move with the playback clock',first,second)
 expected=blue(reference)
 assert expected>1000,expected
 for name in ['ass-authored','ass-selected','ass-after-seek']:
