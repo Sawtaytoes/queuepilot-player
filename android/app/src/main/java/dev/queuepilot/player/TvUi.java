@@ -67,7 +67,11 @@ final class TvUi {
     view.setFocusable(true);
     view.setClickable(true);
     view.setBackground(shape(fill, 0, 9));
-    view.setOnClickListener(v -> action.run());
+    view.setOnClickListener(
+        v -> {
+          v.requestFocusFromTouch();
+          action.run();
+        });
     view.setOnFocusChangeListener(
         (v, focused) -> v.setBackground(shape(fill, focused ? ACCENT : 0, 9)));
   }

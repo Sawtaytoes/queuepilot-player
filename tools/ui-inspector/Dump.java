@@ -45,6 +45,8 @@ public class Dump extends Instrumentation {
     xml.attribute(null, "content-desc", value(n.getContentDescription()));
     xml.attribute(null, "class", value(n.getClassName()));
     xml.attribute(null, "resource-id", value(n.getViewIdResourceName()));
+    xml.attribute(null, "selected", String.valueOf(n.isSelected()));
+    xml.attribute(null, "state-desc", value(n.getStateDescription()));
     xml.attribute(null, "focused", String.valueOf(n.isFocused()));
     xml.attribute(null, "clickable", String.valueOf(n.isClickable()));
     xml.attribute(null, "enabled", String.valueOf(n.isEnabled()));

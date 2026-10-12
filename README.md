@@ -49,6 +49,10 @@ The Cast overlay shows available portraits, actor names and roles from Plex meta
 It is the title cast, not scene-by-scene actor recognition. Profiles also show their avatars.
 **Rewind on resume** defaults to three seconds and can be disabled or changed in Settings.
 Player focus highlights are rounded, including the seek buttons with interval labels.
+Options use QueuePilot panels with visible selections and D-pad focus. Browsing/settings
+use a side panel; playback audio, subtitle and speed menus stay above their launching
+controls. Back closes a panel and returns focus; playback controls stay visible while
+a menu is open. The subtitle picker does not add faithful ASS rendering.
 See [native sessions](docs/native-sessions.md).
 
 This preview does not negotiate transcoding, import real story

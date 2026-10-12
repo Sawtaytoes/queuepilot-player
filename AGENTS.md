@@ -15,7 +15,9 @@ not an adopted dependency. Roku needs a separate BrightScript/SceneGraph client.
 The approved Android TV presentation is queue-first: a left rail, compact queue cards,
 continuation, and artwork browsing below. The actual native UI must match the reviewed
 presentation; a diagnostic screen is not a substitute. Keep inputs and dialogs bounded,
-never screen-wide. Plex onboarding uses device-link authorization, Home profiles, and
+never screen-wide. Browsing/settings options use app-styled side panels. Playback menus
+anchor to their launching controls (above the bottom bar when launched there), never an
+unrelated browsing sidebar. Keep the controls visible and restore focus on dismissal. Plex onboarding uses device-link authorization, Home profiles, and
 automatic server discovery; do not expose token entry to viewers. Do not claim native
 4K UI, verified offline Plex Home switching, faithful ASS rendering, native QueuePilot
 starts, tone-mapping quality, or passthrough without actual device evidence.
