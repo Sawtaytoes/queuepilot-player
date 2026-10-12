@@ -2174,9 +2174,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void installPlaybackMenus() {
     bindPlaybackMenu(androidx.media3.ui.R.id.exo_settings, this::playbackOptions);
-    bindPlaybackMenu(androidx.media3.ui.R.id.exo_subtitle,
+    bindPlaybackMenu(
+        androidx.media3.ui.R.id.exo_subtitle,
         anchor -> trackOptions(anchor, androidx.media3.common.C.TRACK_TYPE_TEXT));
-    bindPlaybackMenu(androidx.media3.ui.R.id.exo_audio_track,
+    bindPlaybackMenu(
+        androidx.media3.ui.R.id.exo_audio_track,
         anchor -> trackOptions(anchor, androidx.media3.common.C.TRACK_TYPE_AUDIO));
     bindPlaybackMenu(androidx.media3.ui.R.id.exo_playback_speed, this::speedOptions);
   }
@@ -2184,10 +2186,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void bindPlaybackMenu(int id, java.util.function.Consumer<View> open) {
     View control = playerView.findViewById(id);
     if (control == null) return;
-    control.setOnClickListener(view -> {
-      view.requestFocusFromTouch();
-      open.accept(view);
-    });
+    control.setOnClickListener(
+        view -> {
+          view.requestFocusFromTouch();
+          open.accept(view);
+        });
   }
 
   private void playbackOptions(View anchor) {
