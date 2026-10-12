@@ -86,3 +86,24 @@ to become globally idle. It targets its own test package and never restarts the 
 Install it only in the guarded emulator; it is not part of the viewer APK. Native checks
 cover audience persistence, profile-bound plans, cast faces/roles, D-pad seek focus, three-second
 resume rewind, encrypted offline progress retry, next-item playback and natural completion.
+
+## Repeatable Docker lab
+
+`tools/tv-lab.sh` manages the named `queuepilot-tv-lab` container. Build the APK and generate
+fixtures above, then start it with absolute paths:
+
+```sh
+./tools/tv-lab.sh start /absolute/path/to/queuepilot-player /absolute/path/to/emulator-cache /absolute/path/to/fixtures
+./tools/tv-lab.sh status
+./tools/tv-lab.sh test
+./tools/tv-lab.sh stop
+```
+
+The launcher runs the fixture service beside the headless Google Android TV emulator,
+mounts source read-only, gives the emulator its own Android home, and publishes no ports.
+It does not use the build signing cache or a household ADB connection. Wait for status to
+report `boot_completed=1` before testing. The test command runs the guarded sign-in,
+native playback and two-scale layout checks. Stop leaves the container configured for the
+next session; each emulator start wipes only its disposable guest. `remove` deletes only
+a container carrying the expected lab ownership label. Remove it before switching to
+another checkout, and before removing a source worktree.
