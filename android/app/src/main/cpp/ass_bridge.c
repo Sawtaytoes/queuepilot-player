@@ -1,5 +1,7 @@
 #include <jni.h>
 #include <android/bitmap.h>
+#include <android/log.h>
+#include <stdarg.h>
 #include <ass/ass.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -12,6 +14,9 @@ typedef struct {
     int width, height, force;
 } Context;
 #define JNI(name) Java_dev_queuepilot_player_AssNative_##name
+static void message(int level, const char *format, va_list arguments, void *data) {
+    if (level <= 5) __android_log_vprint(ANDROID_LOG_DEBUG, "QueuePilotLibass", format, arguments);
+}
 static Context *context(jlong handle) { return (Context *)(intptr_t)handle; }
 static void destroy(Context *ctx) {
     if (!ctx) return;
@@ -25,6 +30,7 @@ JNIEXPORT jlong JNICALL JNI(create)(JNIEnv *env, jclass type) {
     if (!ctx) return 0;
     ctx->library = ass_library_init();
     if (!ctx->library) { destroy(ctx); return 0; }
+    ass_set_message_cb(ctx->library, message, NULL);
     ctx->renderer = ass_renderer_init(ctx->library);
     if (!ctx->renderer) { destroy(ctx); return 0; }
     ass_set_cache_limits(ctx->renderer, 1000, 48);

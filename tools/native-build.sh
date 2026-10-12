@@ -80,7 +80,7 @@ EOF
   build_library freetype -Dharfbuzz=disabled -Dzlib=disabled -Dbzip2=disabled -Dpng=disabled -Dbrotli=disabled -Dtests=disabled
   build_library fribidi -Ddocs=false -Dtests=false -Dbin=false
   build_library harfbuzz -Dtests=disabled -Dutilities=disabled -Ddocs=disabled -Dcairo=disabled -Dglib=disabled -Dgobject=disabled -Dfreetype=disabled -Dicu=disabled
-  build_library libass -Dtest=disabled -Dcompare=disabled -Dprofile=disabled -Dfontconfig=disabled -Dcoretext=disabled -Ddirectwrite=disabled -Drequire-system-font-provider=false -Dlibunibreak=disabled -Dasm=disabled
+  build_library libass -Dtest=disabled -Dcompare=disabled -Dprofile=disabled -Dfontconfig=disabled -Dcoretext=disabled -Ddirectwrite=disabled -Drequire-system-font-provider=false -Dlibunibreak=disabled -Dasm=auto
   "$NDK_BIN/$compiler-clang" -std=c11 -O2 -fPIC -I"$prefix/include" -c /source/android/app/src/main/cpp/ass_bridge.c -o "$work/ass_bridge.o"
   "$NDK_BIN/$compiler-clang++" -shared -Wl,-z,max-page-size=16384 "$work/ass_bridge.o" \
     -Wl,--start-group "$prefix/lib/libass.a" "$prefix/lib/libfreetype.a" "$prefix/lib/libfribidi.a" "$prefix/lib/libharfbuzz.a" -Wl,--end-group \
