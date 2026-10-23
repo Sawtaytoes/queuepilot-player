@@ -1,8 +1,9 @@
 # QueuePilot TV
 
 A native Android TV preview with a queue-first home screen, Plex device-link sign-in,
-profile selection, artwork browsing, and a Media3 player. It uses the existing
-`dev.queuepilot.player.prototype` application ID and updates QueuePilot Lab in place.
+profile selection, artwork browsing, and a Media3 player. The launcher label is
+**QueuePilot**. It keeps the existing `dev.queuepilot.player.prototype` application ID, so
+it updates the app formerly labeled QueuePilot Lab in place.
 
 ## Connect your library
 
@@ -10,13 +11,25 @@ Choose **Sign in with Plex**, open **plex.tv/link** on a phone or computer, and 
 four-character code displayed on the TV. The app then shows Plex Home profiles and discovers
 their servers. A single available server connects automatically; multiple servers appear as
 cards. Protected profiles use their existing Plex Home PIN. No API token, profile name, or
-Plex server address needs to be entered on the television.
+Plex server address needs to be entered on the television. The profile picker marks a
+protected profile **🔒 PIN** and the account owner **Owner**; other profiles carry no label.
 
 The home screen follows the approved queue-first presentation: a left navigation rail,
-queue cards at the top, continuation below, and library browsing. D-pad focus outlines the
-selected card. Back returns to the preceding screen. Plex libraries use artwork cards,
+queues first, continuation below, and library browsing. Home lists every queue, the ones
+that play as the active profile first and those that switch profile after, each in the
+server's order. A card names its audience as text ("Ada, Grace") beside the faces, and a
+switching card names the profile it switches to. While a people filter is active, Home and
+Watching say "Showing N of M queues" with a one-press **Clear**. The continue cards name
+the queue or the media server they come from; an episode is named by its show, then
+"S1 · E9 · Title". The rail's avatar switches profile. D-pad focus outlines the selected
+card. Back returns to the preceding screen. Libraries use square-cornered artwork cards,
 and configuration dialogs use bounded widths. **Explore the demo** opens a fictional
 catalog for reviewing the same native layout without an account.
+
+**Display size** in Settings scales the whole interface to 70, 80, 90, 100, 110 or 125
+percent, and applies at once. Grids gain columns at smaller sizes. The Media3 control groups
+are scaled about their anchored edge. The title screen keeps a long title to two lines and a
+summary to four, with **More** for the full text.
 
 Credentials and the profile roster are encrypted with Android Keystore. Previously connected
 unprotected profiles can use their saved server credentials and catalog cache without a
@@ -34,7 +47,8 @@ requests 1440 pixels. The detail screen can compare actual 240px and 1440px resp
 The interface does not claim native 4K composition on every Android TV device.
 
 Connect a QueuePilot server in Settings or Watching. The TV lists **Plex queues only**,
-with people portraits and the existing required/optional audience filter. A queue starts
+with people portraits, the audience as text, and the existing required/optional audience
+filter. A queue starts
 inside the app using an engine-produced plan. The actual Plex Home profile must match the
 queue binding; a mismatched profile is offered an explicit switch before playback.
 Native playback never sends `/api/play` or controls another app or the room.
@@ -46,8 +60,20 @@ silently borrowing owner privileges. Queue snapshots and the people filter survi
 starting a new queue still requires the server. An active lineup is not restored after a crash.
 
 The Cast overlay shows available portraits, actor names and roles from Plex metadata.
-It is the title cast, not scene-by-scene actor recognition. Profiles also show their avatars.
-**Rewind on resume** defaults to three seconds and can be disabled or changed in Settings.
+It is the title cast, not scene-by-scene actor recognition. An episode lists its own credits
+first, then its season's and show's, once each: many libraries keep the cast only on the show.
+Portraits load through the connected server's image transcoder, including external portrait
+URLs; a portrait the server cannot fetch is requested directly without credentials.
+Profiles also show their avatars.
+**Rewind on resume** is Off by default. Choose 1, 3, 5 or 10 seconds in Settings; a stored
+choice is kept.
+Plex intro and credits markers show **Skip Intro** or **Skip Credits** at the bottom right
+while playback is inside the marker. The button takes D-pad focus without pausing; Enter
+seeks to the marker end. It hides after eight seconds unless the controls are showing, and
+when playback leaves the marker. Final credits (Plex's `final` flag, or credits ending within
+two seconds of the end) finish the title instead: Plex receives a finished timeline and a
+queue moves to its next item. Skips never leave an authored queue section, and nothing is
+skipped automatically.
 Player focus highlights are rounded, including the seek buttons with interval labels.
 Options use QueuePilot panels with visible selections and D-pad focus. Browsing/settings
 use a side panel; playback audio, subtitle and speed menus stay above their launching
@@ -88,7 +114,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.1.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.5.2.md).
 The repeatable `tools/tv-lab.sh` launcher keeps a named headless Docker lab available
 without involving a household TV; start/status/test/stop commands are documented there.
 

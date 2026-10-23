@@ -12,6 +12,7 @@ def screen():
     match=re.search(r'INSTRUMENTATION_RESULT: xml=(.*)',result)
     if not match: raise AssertionError('UI hierarchy unavailable: '+result)
     return ET.fromstring(match.group(1))
+def has_desc(value):return any(n.get('content-desc')==value for n in screen().iter('node'))
 def text():return '\n'.join(n.get('text','') for n in screen().iter('node'))
 def contains(value):
     for i in range(10):
@@ -31,6 +32,13 @@ def click(label):
                 adb('shell','input','tap',str((x1+x2)//2),str((y1+y2)//2));time.sleep(.5);return
         adb('shell','input','swipe',str(int(width*.91)),str(int(height*.84)),str(int(width*.91)),str(int(height*.33)),'300');time.sleep(.3)
     raise AssertionError('Missing control: '+label+'\n'+text())
+def cast_photos(*names):
+    """A cast card's portrait is described only after its image has been decoded and shown."""
+    for _ in range(20):
+        described={n.get('content-desc','') for n in screen().iter('node')}
+        if all('Photo of '+name in described for name in names):return
+        time.sleep(.5)
+    raise AssertionError('Missing cast photos: '+', '.join(n for n in names if 'Photo of '+n not in described))
 def shot(name):Path('/fixtures/'+name+'.png').write_bytes(adb('exec-out','screencap','-p'))
 def post(path):urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:9010/'+path,method='POST'),timeout=5).read()
 def launch():adb('shell','am','start','-n',PACKAGE+'/dev.queuepilot.player.MainActivity','--ez','fixture','true');time.sleep(1)
@@ -59,12 +67,12 @@ def main():
     post('_expire_next');click('Connect Plex');contains('This code has expired');click('New code');contains('ABCD');post('_claim');contains("Who's watching?");shot('profile-picker')
     click('Morgan');enter_pin('1111');contains("Plex couldn't unlock that profile");click('Choose profile');click('Ada');contains('What are we watching?');contains('Demo Cinema');shot('signed-in-home')
     click('Series');contains('Series');click('Series');contains('Orbit Nine');shot('library')
-    click('Orbit Nine');contains('Season 1');click('Season 1');contains('The signal');click('The signal');contains('Watch with Ada');shot('title')
-    click('Play');time.sleep(3);adb('shell','input','keyevent','127');adb('shell','input','keyevent','19');contains('Decoded video: 1280 × 720');click('Cast');contains('Nadia Lane');shot('cast');click('Close');back();contains('Watch with Ada')
+    click('Orbit Nine');contains('Season 1');click('Season 1');contains('S1 · E9 · The signal');click('Orbit Nine, S1 · E9 · The signal');contains('Watch with Ada');contains('Orbit Nine');shot('title')
+    click('Play');time.sleep(3);adb('shell','input','keyevent','127');adb('shell','input','keyevent','19');contains('Decoded video: 1280 × 720');click('Cast');contains('Nadia Lane');contains('Omar Reed');cast_photos('Nadia Lane','Omar Reed');shot('cast');click('Close');back();contains('Watch with Ada')
     back();contains('The signal');back();contains('Season 1');back();contains('Orbit Nine')
-    click('Home');click('●  Ada');click('Grace');contains('What are we watching?');contains('Demo Cinema');click('Series');click('Series');contains('Orbit Nine')
-    post('_cloud_offline');post('_offline');click('Home');click('●  Grace');click('Ada');contains('What are we watching?');click('Series');contains('Saved listing');click('Series');contains('Saved listing');contains('Orbit Nine');shot('cached-library')
-    post('_online');click('Home');click('●  Ada');click('Morgan');enter_pin('2468');contains('What are we watching?');contains('Demo Cinema')
+    click('Home');click('Switch profile, Ada');click('Grace');contains('What are we watching?');contains('Demo Cinema');click('Series');click('Series');contains('Orbit Nine')
+    post('_cloud_offline');post('_offline');click('Home');click('Switch profile, Grace');click('Ada');contains('What are we watching?');click('Series');contains('Saved listing');click('Series');contains('Saved listing');contains('Orbit Nine');shot('cached-library')
+    post('_online');click('Home');click('Switch profile, Ada');click('Morgan');enter_pin('2468');contains('What are we watching?');contains('Demo Cinema')
     encrypted=adb('shell','run-as',PACKAGE,'cat','shared_prefs/secrets.xml').decode()
     assert 'ciphertext' in encrypted and not any(s in encrypted for s in ('fixture-root','fixture-ada','fixture-grace','fixture-morgan'))
     requests=json.load(urllib.request.urlopen('http://127.0.0.1:9010/_requests'))

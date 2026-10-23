@@ -13,14 +13,29 @@ final class TvUi {
       MUTED = Color.rgb(165, 176, 191),
       ACCENT = Color.rgb(207, 237, 170),
       WHITE = Color.rgb(242, 243, 245);
+  /**
+   * Type was too large at 100% on a large panel viewed from close by, so every text size is
+   * reduced by this factor before the viewer's Display size applies.
+   */
+  static final float TYPE_BASE = 0.86f;
+
   final Context context;
+
+  /** The viewer's Display size, 1.0 at 100%; every dimension and text size goes through it. */
+  final float scale;
 
   TvUi(Context context) {
     this.context = context;
+    // Read on every construction, so the activity and each side panel agree on the size.
+    this.scale =
+        DisplaySize.scale(
+            context
+                .getSharedPreferences("state", Context.MODE_PRIVATE)
+                .getInt(DisplaySize.PREFERENCE_KEY, DisplaySize.DEFAULT_PERCENT));
   }
 
   int dp(float size) {
-    return Math.round(size * context.getResources().getDisplayMetrics().density);
+    return Math.round(size * context.getResources().getDisplayMetrics().density * scale);
   }
 
   LinearLayout column() {
@@ -38,7 +53,7 @@ final class TvUi {
   TextView text(String value, int size, int color) {
     TextView v = new TextView(context);
     v.setText(value);
-    v.setTextSize(size);
+    v.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, size * TYPE_BASE * scale);
     v.setTextColor(color);
     v.setFontFeatureSettings("kern");
     v.setIncludeFontPadding(false);
@@ -55,7 +70,8 @@ final class TvUi {
     GradientDrawable d = new GradientDrawable();
     d.setColor(fill);
     d.setCornerRadius(dp(radius));
-    if (stroke != 0) d.setStroke(dp(2), stroke);
+    // At least two pixels, so a focus outline stays visible at the smallest Display size.
+    if (stroke != 0) d.setStroke(Math.max(2, dp(2)), stroke);
     return d;
   }
 
@@ -64,16 +80,21 @@ final class TvUi {
   }
 
   void focusable(View view, Runnable action, int fill) {
+    focusable(view, action, fill, 9);
+  }
+
+  /** Posters and stills use radius 0: a rounded outline does not fit square artwork. */
+  void focusable(View view, Runnable action, int fill, int radius) {
     view.setFocusable(true);
     view.setClickable(true);
-    view.setBackground(shape(fill, 0, 9));
     view.setOnClickListener(
         v -> {
           v.requestFocusFromTouch();
           action.run();
         });
+    view.setBackground(shape(fill, 0, radius));
     view.setOnFocusChangeListener(
-        (v, focused) -> v.setBackground(shape(fill, focused ? ACCENT : 0, 9)));
+        (v, focused) -> v.setBackground(shape(fill, focused ? ACCENT : 0, radius)));
   }
 
   TextView button(String label, Runnable action, boolean primary) {

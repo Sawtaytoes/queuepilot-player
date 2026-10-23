@@ -31,4 +31,19 @@ public class RewindOnResumeTest {
     r.pause();
     assertEquals(27000, r.resume(30000, 0, 3));
   }
+
+  @Test
+  public void defaultIsOffSoResumeKeepsThePausedPosition() {
+    assertEquals(0, RewindOnResume.DEFAULT_SECONDS);
+    var r = new RewindOnResume();
+    r.pause();
+    assertEquals(42000, r.resume(42000, 0, RewindOnResume.DEFAULT_SECONDS));
+  }
+
+  @Test
+  public void labelsNameOffAndSingularSecond() {
+    assertEquals("Off", RewindOnResume.label(RewindOnResume.DEFAULT_SECONDS));
+    assertEquals("1 second", RewindOnResume.label(1));
+    assertEquals("3 seconds", RewindOnResume.label(3));
+  }
 }

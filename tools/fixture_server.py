@@ -13,8 +13,24 @@ next_pin = 0
 expire_next = False
 native_events=[]
 native_sessions={}
+# Like the engine, a new session for a queue starts where its previous session stopped.
+native_resume={}
+SHOW_FIELDS={'102':'grandparentTitle="Orbit Nine" parentIndex="1" parentTitle="Season 1" grandparentThumb="/art/show-orbit.jpg"','103':'grandparentTitle="Harbor Lights" parentIndex="2" parentTitle="Season 2" grandparentThumb="/art/show-harbor.jpg"'}
 native_offline=False
 video_fixture='sample.mp4'
+markers=False
+# Intro, mid-credits and final credits for the 30-second clip, in Plex's millisecond offsets.
+# Invented films. One has a long title and summary, so the details screen must clamp both;
+# twelve fill several rows, so a smaller Display size visibly gains columns.
+LONG_TITLE='The Extraordinarily Long Voyage of the Lantern Keeper and the Seven Lighthouses Beyond the Northern Sea, Told in Twelve Winters by the Last Keeper of the Northern Light and Her Crew of Two, and of the Ice That Came After'
+LONG_SUMMARY=' '.join(['A retired lantern keeper sails north to relight seven lighthouses that went dark in the same winter.']*9+['The final lighthouse waits beyond the ice.'])
+FILMS=[(301,LONG_TITLE,LONG_SUMMARY),(302,'Glass City','A courier crosses a city built from glass.')]+[(300+i,t,'An invented film for the browsing fixture.') for i,t in enumerate(['Paper Moons','The Quiet Orchard','Signal Fire','North of Tomorrow','Salt and Copper','Small Hours','Kite Season','The Lantern Road','Low Tide','Blue Hour'],3)]
+def films():
+    from xml.sax.saxutils import quoteattr
+    return '<MediaContainer>'+''.join(f'<Video ratingKey="{key}" type="movie" title={quoteattr(title)} summary={quoteattr(summary)} year="2024" thumb="/art/poster.jpg"/>' for key,title,summary in FILMS)+'</MediaContainer>'
+MARKERS='<Marker type="intro" startTimeOffset="6000" endTimeOffset="14000"/><Marker type="credits" startTimeOffset="18000" endTimeOffset="21000"/><Marker type="credits" final="1" startTimeOffset="25000" endTimeOffset="30000"/>'
+# Reserved example domain: the guest has no route to it, so only the server transcoder can serve it.
+EXTERNAL_PORTRAIT='https://images.example.com/portraits/omar.jpg'
 users = [{'id':1,'uuid':'ada','title':'Ada','protected':False,'admin':True,'thumb':'/avatars/ada.jpg'}, {'id':2,'uuid':'grace','title':'Grace','protected':False,'thumb':'/avatars/grace.jpg'}, {'id':3,'uuid':'morgan','title':'Morgan','protected':True,'thumb':'/avatars/nadia.jpg'}]
 
 class Handler(BaseHTTPRequestHandler):
@@ -23,14 +39,15 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data,str): data=data.encode()
         self.send_response(code); self.send_header('Content-Type',mime); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture
+        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers
         path=urlparse(self.path).path
         if path=='/_offline': offline=True; self.respond('ok');return
         if path=='/_ass': video_fixture='styled.mkv';self.respond('ok');return
         if path=='/_tracks': video_fixture='tracks.mkv';self.respond('ok');return
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
-        if path=='/_online': video_fixture='sample.mp4';offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
-        if path=='/_native_reset':native_events.clear();native_sessions.clear();self.respond('ok');return
+        if path=='/_markers': markers=True;self.respond('ok');return
+        if path=='/_online': video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
+        if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
         if path=='/_cloud_offline': cloud_offline=True;self.respond('ok');return
         if path=='/_expire_next': expire_next=True;self.respond('ok');return
@@ -44,7 +61,8 @@ class Handler(BaseHTTPRequestHandler):
             if path=='/api/native/sessions':
                 if self.headers.get('X-Plex-Profile-Token') not in ('fixture-user-ada','fixture-root'):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
                 ident='native-fixture-'+str(len(native_sessions)+1)
-                plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':'ada','profileName':'Ada','homeServerId':'fixture-server','sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':2,'handed':2,'items':[{'ratingKey':'102','positionKey':'0:home:102','resumeMs':4000},{'ratingKey':'103','positionKey':'1:home:103','resumeMs':0}]}
+                plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':'ada','profileName':'Ada','homeServerId':'fixture-server','sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':2,'handed':2,'items':[{'ratingKey':'102','positionKey':'0:home:102','resumeMs':4000,'type':'episode','title':'The signal','show':'Orbit Nine','season':1,'episode':9},{'ratingKey':'103','positionKey':'1:home:103','resumeMs':0,'type':'episode','title':'The return','show':'Harbor Lights','season':2,'episode':3}]}
+                plan['cursor']=native_resume.get(value['setId'],0)
                 native_sessions[ident]=plan;self.respond(json.dumps(plan),'application/json');return
             ident=path.split('/')[4];plan=native_sessions.get(ident)
             if not plan or self.headers.get('X-Native-Session-Key')!='fixture-session-key':self.respond('{}','application/json',403);return
@@ -57,6 +75,7 @@ class Handler(BaseHTTPRequestHandler):
                     self.respond(json.dumps({'error':'Stale or out-of-order event'}),'application/json',409);return
                 native_events.append(value);plan['sequence']=value['sequence']
                 if value['state'] in ('ended','skip','section-end'):plan['cursor']+=1
+                native_resume[plan['setId']]=plan['cursor'] if plan['cursor']<len(plan['items']) else 0
                 self.respond(json.dumps({'ok':True,'cursor':plan['cursor']}),'application/json');return
         if path=='/api/v2/pins':
             if cloud_offline:self.respond('{}','application/json',503);return
@@ -82,7 +101,8 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/api/native/queues':
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
             selected=set(parse_qs(parsed.query).get('people',[''])[0].split(','))- {''}
-            queues=[{'id':'ada-watch','title':'Movies & Shows','kind':'picks','people':['ada'],'requiredProfile':'Ada'},{'id':'friends-watch','title':'Movies & Shows · 2','kind':'picks','people':['ada','grace'],'requiredProfile':'Ada'}]
+            # Titles repeat, as they do on a real server; people and the Plex profile tell them apart.
+            queues=[{'id':'ada-watch','title':'Movies & Shows','kind':'picks','people':['ada'],'requiredProfile':'Ada'},{'id':'movies-grace','title':'Movies','kind':'picks','people':['grace'],'requiredProfile':'Grace'},{'id':'friends-watch','title':'Movies & Shows · 2','kind':'picks','people':['ada','grace'],'requiredProfile':'Ada'},{'id':'movies-ada','title':'Movies','kind':'rules','people':['ada'],'requiredProfile':'Ada'},{'id':'movies-family','title':'Movies','kind':'picks','people':['ada','grace'],'requiredProfile':'Morgan'}]
             if selected:queues=[q for q in queues if selected.issubset(set(q['people'])) and 'ada' in selected]
             self.respond(json.dumps({'queues':queues,'people':[{'id':'ada','displayName':'Ada'},{'id':'grace','displayName':'Grace'}]}),'application/json');return
         if path.startswith('/api/v2/'):
@@ -107,21 +127,33 @@ class Handler(BaseHTTPRequestHandler):
         if offline:self.respond('unavailable',code=503);return
         if path=='/:/timeline':self.respond('<MediaContainer/>');return
         if path=='/library/onDeck':
-            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg"/></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg" {SHOW_FIELDS["102"]}/><Video ratingKey="103" type="episode" index="3" title="The return" thumb="/art/poster.jpg" {SHOW_FIELDS["103"]}/></MediaContainer>');return
         if path=='/library/sections':
-            self.respond('<MediaContainer><Directory key="1" type="show" title="Series"/></MediaContainer>');return
+            self.respond('<MediaContainer><Directory key="1" type="show" title="Series"/><Directory key="2" type="movie" title="Films"/></MediaContainer>');return
+        if path=='/library/sections/2/all':
+            self.respond(films());return
         if path=='/library/sections/1/all':
-            self.respond('<MediaContainer><Directory ratingKey="100" key="/library/metadata/100/children" type="show" title="Orbit Nine" thumb="/art/poster.jpg"/></MediaContainer>');return
+            self.respond('<MediaContainer><Directory ratingKey="100" key="/library/metadata/100/children" type="show" title="Orbit Nine" thumb="/art/poster.jpg"/><Directory ratingKey="200" key="/library/metadata/200/children" type="show" title="Harbor Lights" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/100/children':
             self.respond('<MediaContainer><Directory ratingKey="101" type="season" title="Season 1" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/101/children':
-            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg"/></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg" {SHOW_FIELDS["102"]}/></MediaContainer>');return
+        if path=='/library/metadata/200/children':
+            self.respond('<MediaContainer><Directory ratingKey="201" type="season" title="Season 2" thumb="/art/poster.jpg"/></MediaContainer>');return
+        if path=='/library/metadata/201/children':
+            self.respond(f'<MediaContainer><Video ratingKey="103" type="episode" index="3" title="The return" thumb="/art/poster.jpg" {SHOW_FIELDS["103"]}/></MediaContainer>');return
+        if path in ('/library/metadata/100','/library/metadata/200'):
+            # Like many anime libraries, the show holds the cast and its episodes carry no Role.
+            # One portrait is a server path; the other is an external HTTPS portrait host.
+            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" type="show" title="{"Orbit Nine" if path.endswith("100") else "Harbor Lights"}" thumb="/art/poster.jpg"><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="{EXTERNAL_PORTRAIT}"/></Directory></MediaContainer>');return
+        if path in ('/library/metadata/101','/library/metadata/201'):
+            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" parentRatingKey="{"100" if path.endswith("101") else "200"}" type="season" title="Season {1 if path.endswith("101") else 2}" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/103':
-            self.respond('<MediaContainer><Video ratingKey="103" type="episode" index="10" title="The return" duration="30000" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/></Video></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="103" parentRatingKey="201" grandparentRatingKey="200" {SHOW_FIELDS["103"]} type="episode" index="3" title="The return" duration="30000" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira (flashback)" thumb="/art/nadia.jpg"/></Video></MediaContainer>');return
         if path=='/library/metadata/102':
-            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" duration="30000" viewOffset="{60000 if video_fixture.endswith("styled.mkv") else 4000}" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="/art/omar.jpg"/></Video></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" parentRatingKey="101" grandparentRatingKey="100" {SHOW_FIELDS["102"]} type="episode" index="9" title="The signal" duration="30000" viewOffset="{60000 if video_fixture.endswith("styled.mkv") else 4000}" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Director tag="Lena Hart"/>{MARKERS if markers and parse_qs(parsed.query).get("includeMarkers")==["1"] else ""}</Video></MediaContainer>');return
         if path=='/photo/:/transcode':
-            width=int(parse_qs(parsed.query).get('width',['240'])[0]);art=parse_qs(parsed.query).get('url',[''])[0];name=art.split('/')[-1] if art in ('/art/nadia.jpg','/art/omar.jpg') else ('high.jpg' if width>240 else 'low.jpg');data=(ROOT/name).read_bytes();self.respond(data,'image/jpeg');return
+            width=int(parse_qs(parsed.query).get('width',['240'])[0]);art=parse_qs(parsed.query).get('url',[''])[0];name=art.split('/')[-1] if art in ('/art/nadia.jpg','/art/omar.jpg',EXTERNAL_PORTRAIT) else ('high.jpg' if width>240 else 'low.jpg');data=(ROOT/name).read_bytes();self.respond(data,'image/jpeg');return
         if path=='/video/sample.mp4':
             data=(ROOT/video_fixture).read_bytes();start=0;end=len(data)-1;range_header=self.headers.get('Range','')
             if range_header.startswith('bytes='):

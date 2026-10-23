@@ -54,6 +54,10 @@ docker exec queuepilot-player-emulator adb -s emulator-5554 install -r /fixtures
 docker exec queuepilot-player-emulator python3 -u /source/tools/smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/native_smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/panels_smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/markers_smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/labels_smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/display_smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/display_smoke.py --density-320
 docker exec queuepilot-player-emulator python3 -u /source/tools/layout_smoke.py
 ```
 
@@ -89,8 +93,26 @@ Home enrollment, and Roku require separate device evidence.
 The standalone inspector reads the accessibility tree without waiting for playback animations
 to become globally idle. It targets its own test package and never restarts the player.
 Install it only in the guarded emulator; it is not part of the viewer APK. Native checks
-cover audience persistence, profile-bound plans, cast faces/roles, D-pad seek focus, three-second
-resume rewind, encrypted offline progress retry, next-item playback and natural completion.
+cover audience persistence, profile-bound plans, cast faces/roles, D-pad seek focus, resume
+rewind (Off by default, then a stored three-second choice), encrypted offline progress retry,
+next-item playback and natural completion. The fixture episodes carry no Role entries of their
+own; their cast comes from the show, and one portrait is an external HTTPS URL that only the
+fixture server's transcoder can serve. A cast card is described as `Photo of <name>` only after
+its portrait has been decoded and shown, which is what the checks wait for.
+`markers_smoke.py` runs after the native check, which connects the fixture QueuePilot server.
+It enables intro, mid-credits and final-credits markers on one episode and checks both
+library and queue playback: each skip button takes focus, Enter lands after the marker, and
+final credits produce a stopped Plex timeline past 90% of the duration or a completed queue
+item followed by the next item. The eight-second auto-hide is not asserted
+on the emulator.
+`labels_smoke.py` follows it: Home lists every queue grouped by the profile it plays as, a
+people filter says how many queues it shows and clears in one press, queues sit above the
+continue cards, and the player names the show. `display_smoke.py` then sets Display size to
+100%, 70% and 125% through Settings and checks that the invented Films grid gains columns at
+the smaller size, the choice survives a restart, a focused poster still draws its outline,
+and every visible label stays on screen. It also opens a film with a long title and summary:
+the title is two lines, the summary is four, and More opens the full text. Run it once at the
+emulator's density and once with `--density-320`.
 
 ## Repeatable Docker lab
 

@@ -66,6 +66,10 @@ case "$operation" in
     docker exec "$lab_name" python3 -u /source/tools/smoke.py
     docker exec "$lab_name" python3 -u /source/tools/native_smoke.py
     docker exec "$lab_name" python3 -u /source/tools/panels_smoke.py
+    docker exec "$lab_name" python3 -u /source/tools/markers_smoke.py
+    docker exec "$lab_name" python3 -u /source/tools/labels_smoke.py
+    docker exec "$lab_name" python3 -u /source/tools/display_smoke.py
+    docker exec "$lab_name" python3 -u /source/tools/display_smoke.py --density-320
     docker exec "$lab_name" python3 -u /source/tools/layout_smoke.py
     docker exec "$lab_name" python3 -u /source/tools/layout_smoke.py --density-320
     ;;

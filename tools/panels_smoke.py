@@ -28,15 +28,18 @@ assert s.adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','gol
 s.post('_online')
 for density in (240,320):
     s.adb('shell','wm','density',str(density));time.sleep(1);s.launch();s.click('Home');s.click('Settings')
-    s.click('Rewind on resume · 3 seconds');s.contains('Replay a little');assert selected()==['3 seconds'],selected()
-    f=focused();assert f is not None and f.get('content-desc')=='3 seconds'
+    installed=re.search(r'versionName=(\S+)',s.adb('shell','dumpsys','package',s.PACKAGE).decode()).group(1)
+    s.contains('Playback preview · '+installed)
+    # Rewind on resume defaults to Off; an explicitly stored choice survives a restart.
+    s.click('Rewind on resume · Off');s.contains('Replay a little');assert selected()==['Off'],selected()
+    f=focused();assert f is not None and f.get('content-desc')=='Off'
     panel=bounds(next(s.screen().iter('node')));assert panel[0]>960 and panel[2]<1920,panel
-    s.shot('panel-rewind-'+str(density));key(20);s.back();s.contains('Rewind on resume · 3 seconds')
-    assert focused().get('text')=='Rewind on resume · 3 seconds'
-    s.click('Rewind on resume · 3 seconds');key(20);key(23);s.contains('Rewind on resume · 5 seconds')
-    s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Settings');s.click('Rewind on resume · 5 seconds');assert selected()==['5 seconds']
-    key(19);key(23);s.contains('Rewind on resume · 3 seconds')
-    s.post('_tracks');s.click('Series');s.click('Series');s.click('Orbit Nine');s.click('Season 1');s.click('The signal');s.click('Play');time.sleep(2);key(127)
+    s.shot('panel-rewind-'+str(density));key(20);s.back();s.contains('Rewind on resume · Off')
+    assert focused().get('text')=='Rewind on resume · Off'
+    s.click('Rewind on resume · Off');key(20);key(23);s.contains('Rewind on resume · 1 second')
+    s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Settings');s.click('Rewind on resume · 1 second');assert selected()==['1 second']
+    key(19);key(23);s.contains('Rewind on resume · Off')
+    s.post('_tracks');s.click('Series');s.click('Series');s.click('Orbit Nine');s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play');time.sleep(2);key(127)
     box=open_gear();anchored(box);assert focused().get('content-desc')=='Audio';time.sleep(4);s.shot('panel-playback-'+str(density));s.back();gear_focus()
     box=open_gear();s.click('Playback speed');anchored(box);assert selected()==['Normal · 1×'];s.click('1.5×');gear_focus()
     box=open_gear();s.click('Playback speed');assert selected()==['1.5×'];s.shot('panel-speed-'+str(density));s.click('Normal · 1×')
@@ -54,4 +57,4 @@ assert len(choices)==2 and choices[0]!=choices[1],choices
 s.click(choices[1]);open_gear();s.click('Audio');assert selected()==[choices[1]];s.back();s.back()
 assert 'FATAL EXCEPTION' not in s.adb('logcat','-d','-b','crash').decode()
 s.post('_online')
-print('PASS: 240/320dpi side panels, persisted rewind, D-pad selection/cancel, control-anchored playback menus, focus return, speed/audio/subtitle switching and subtitle Off')
+print('PASS: 240/320dpi side panels, rewind default Off and persisted choice, D-pad selection/cancel, control-anchored playback menus, focus return, speed/audio/subtitle switching and subtitle Off')

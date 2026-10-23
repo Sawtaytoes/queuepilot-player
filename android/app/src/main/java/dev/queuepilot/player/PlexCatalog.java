@@ -20,7 +20,15 @@ final class PlexCatalog {
       int episode,
       JSONArray roles,
       long duration,
-      long resume) {
+      long resume,
+      String seasonKey,
+      String showKey,
+      JSONArray markers,
+      String showTitle,
+      int season,
+      String seasonTitle,
+      String showThumb,
+      String summary) {
     JSONObject json() throws Exception {
       return new JSONObject()
           .put("key", key)
@@ -33,7 +41,74 @@ final class PlexCatalog {
           .put("episode", episode)
           .put("roles", roles)
           .put("duration", duration)
-          .put("resume", resume);
+          .put("resume", resume)
+          .put("seasonKey", seasonKey)
+          .put("showKey", showKey)
+          .put("markers", markers)
+          .put("showTitle", showTitle)
+          .put("season", season)
+          .put("seasonTitle", seasonTitle)
+          .put("showThumb", showThumb)
+          .put("summary", summary);
+    }
+
+    /** The large line: the show for an episode, otherwise this item's title. */
+    String primary() {
+      return EpisodeLabel.primary(type, title, showTitle);
+    }
+
+    /** "S1 · E9 · The signal" for an episode; empty for anything else. */
+    String secondary() {
+      return EpisodeLabel.secondary(type, season, episode, title);
+    }
+
+    String spoken() {
+      return EpisodeLabel.spoken(type, title, showTitle, season, episode);
+    }
+
+    /** Poster-shaped episode cards use the show poster, like the approved preview. */
+    String posterThumb() {
+      return "episode".equals(type) && !showThumb.isEmpty() ? showThumb : thumb;
+    }
+
+    /** Intro and credits markers, when the metadata was requested with includeMarkers=1. */
+    java.util.List<MarkerSkip.Marker> skipMarkers() {
+      java.util.List<MarkerSkip.Marker> list = new java.util.ArrayList<>();
+      for (int i = 0; i < markers.length(); i++) {
+        JSONObject m = markers.optJSONObject(i);
+        if (m != null)
+          list.add(
+              new MarkerSkip.Marker(
+                  m.optString("type"),
+                  m.optLong("start"),
+                  m.optLong("end"),
+                  m.optBoolean("isFinal")));
+      }
+      return list;
+    }
+
+    /** The same title with a completed cast; inherited credits are looked up only once. */
+    Entry withCast(JSONArray completeRoles) {
+      return new Entry(
+          key,
+          title,
+          type,
+          thumb,
+          children,
+          part,
+          cast,
+          episode,
+          completeRoles,
+          duration,
+          resume,
+          "",
+          "",
+          markers,
+          showTitle,
+          season,
+          seasonTitle,
+          showThumb,
+          summary);
     }
 
     static Entry fromJson(JSONObject j) {
@@ -48,7 +123,16 @@ final class PlexCatalog {
           j.optInt("episode"),
           j.optJSONArray("roles") == null ? new JSONArray() : j.optJSONArray("roles"),
           j.optLong("duration"),
-          j.optLong("resume"));
+          j.optLong("resume"),
+          j.optString("seasonKey"),
+          j.optString("showKey"),
+          j.optJSONArray("markers") == null ? new JSONArray() : j.optJSONArray("markers"),
+          // Catalogs cached before 0.5.2 lack these; the episode then keeps its own title.
+          j.optString("showTitle"),
+          j.optInt("season", EpisodeLabel.UNKNOWN),
+          j.optString("seasonTitle"),
+          j.optString("showThumb"),
+          j.optString("summary"));
     }
   }
 
@@ -143,10 +227,27 @@ final class PlexCatalog {
                   .put("episode", attribute(parser, "index"))
                   .put("roles", new JSONArray())
                   .put("duration", attribute(parser, "duration"))
-                  .put("resume", attribute(parser, "viewOffset"));
+                  .put("resume", attribute(parser, "viewOffset"))
+                  .put("seasonKey", attribute(parser, "parentRatingKey"))
+                  .put("showKey", attribute(parser, "grandparentRatingKey"))
+                  .put("markers", new JSONArray())
+                  .put("showTitle", attribute(parser, "grandparentTitle"))
+                  .put("season", seasonNumber(attribute(parser, "parentIndex")))
+                  .put("seasonTitle", attribute(parser, "parentTitle"))
+                  .put("showThumb", attribute(parser, "grandparentThumb"))
+                  .put("summary", attribute(parser, "summary"));
           itemDepth = parser.getDepth();
           cast.setLength(0);
-        } else if (current != null && name.equals("Part") && current.optString("part").isEmpty())
+        } else if (current != null && name.equals("Marker"))
+          current
+              .getJSONArray("markers")
+              .put(
+                  new JSONObject()
+                      .put("type", attribute(parser, "type"))
+                      .put("start", number(attribute(parser, "startTimeOffset")))
+                      .put("end", number(attribute(parser, "endTimeOffset")))
+                      .put("isFinal", "1".equals(attribute(parser, "final"))));
+        else if (current != null && name.equals("Part") && current.optString("part").isEmpty())
           current.put("part", attribute(parser, "key"));
         else if (current != null
             && java.util.Set.of("Role", "Director", "Writer", "Producer").contains(name)) {
@@ -155,6 +256,7 @@ final class PlexCatalog {
               .put(
                   new JSONObject()
                       .put("name", attribute(parser, "tag"))
+                      .put("kind", name)
                       .put("role", name.equals("Role") ? attribute(parser, "role") : name)
                       .put("thumb", attribute(parser, "thumb")));
           if (cast.length() > 0) cast.append('\n');
@@ -171,6 +273,22 @@ final class PlexCatalog {
       }
     }
     return result;
+  }
+
+  private static int seasonNumber(String value) {
+    try {
+      return Integer.parseInt(value);
+    } catch (NumberFormatException e) {
+      return EpisodeLabel.UNKNOWN;
+    }
+  }
+
+  private static long number(String value) {
+    try {
+      return Long.parseLong(value);
+    } catch (NumberFormatException e) {
+      return -1;
+    }
   }
 
   private static String attribute(XmlPullParser parser, String key) {

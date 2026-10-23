@@ -57,12 +57,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private long nativeSequence;
   private final ExecutorService progressNetwork = Executors.newSingleThreadExecutor();
   private PlexCatalog.Entry playingEntry;
+  private boolean isCastLoading;
+  private TextView skipButton;
+  private List<MarkerSkip.Marker> playingMarkers = List.of();
+  private MarkerSkip.Marker skipMarker;
+  private long skipShownAt;
+  private boolean isSkipDismissed;
+  private boolean isControllerVisible;
   private String playingOrigin = "", playingToken = "";
   private long sectionFloor, sectionEnd = -1;
   private boolean advancing;
   private final Set<TvPanel> panels = new HashSet<>();
   private final RewindOnResume rewind = new RewindOnResume();
   private JSONObject pendingNativeQueue;
+  /** The catalog entry of the queue being played, saved with the profile's resume snapshot. */
+  private JSONObject nativeQueue;
   private String pendingNativeProfile = "";
   private JSONArray queuePeople = new JSONArray();
 
@@ -82,6 +91,20 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private int dp(int size) {
     return ui.dp(size);
+  }
+
+  private int displayPercent() {
+    return DisplaySize.valid(
+        prefs().getInt(DisplaySize.PREFERENCE_KEY, DisplaySize.DEFAULT_PERCENT));
+  }
+
+  /** Columns for a grid that has {@code baseline} columns at 100%. */
+  private int columns(int baseline) {
+    return DisplaySize.columns(baseline, displayPercent());
+  }
+
+  private int itemWidth(int columns) {
+    return DisplaySize.itemWidth(mainWidth, columns, 14);
   }
 
   @Override
@@ -222,10 +245,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     nav(rail, "Movies", selected, () -> browseType("movie", "Movies"));
     nav(rail, "Settings", selected, () -> navigate(new Screen("settings")));
     rail.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1));
-    TextView profileButton =
-        ui.button("●  " + profileName(), () -> navigate(new Screen("profiles")), false);
+    // The avatar alone switches profile; the name is spoken, and shown in the switcher.
+    ImageView face = avatar(44);
     if (profile != null) {
-      ImageView face = avatar(44);
       String thumb = profile.optString("thumb");
       JSONArray users = account.optJSONArray("users");
       if (thumb.isEmpty() && users != null)
@@ -234,12 +256,16 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           if (user != null && userId(user).equals(activeId)) thumb = user.optString("thumb");
         }
       loadProfileAvatar(face, thumb);
-      rail.addView(face);
-      ui.gap(rail, 8);
     }
-    rail.addView(profileButton);
-    ui.gap(rail, 12);
-    rail.addView(ui.text(profile == null ? "Demo library" : "Plex library", 11, TvUi.MUTED));
+    FrameLayout profileButton = new FrameLayout(this);
+    profileButton.setPadding(dp(4), dp(4), dp(4), dp(4));
+    profileButton.addView(face);
+    ui.focusable(profileButton, () -> navigate(new Screen("profiles")), TvUi.BG);
+    profileButton.setBackground(ui.shape(0, 0, 40));
+    profileButton.setOnFocusChangeListener(
+        (v, focused) -> v.setBackground(ui.shape(0, focused ? TvUi.ACCENT : 0, 40)));
+    profileButton.setContentDescription("Switch profile, " + profileName());
+    rail.addView(profileButton, new LinearLayout.LayoutParams(-2, -2));
     ScrollView scroll = new ScrollView(this);
     scroll.setFillViewport(true);
     scroll.setClipToPadding(false);
@@ -247,12 +273,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     content.setPadding(dp(36), dp(28), dp(32), dp(36));
     scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
     root.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
+    // In Display-size-scaled dp, so a smaller size leaves room for more columns.
     mainWidth =
         Math.max(
-            540,
+            480,
             Math.round(
                     getResources().getDisplayMetrics().widthPixels
-                        / getResources().getDisplayMetrics().density)
+                        / (getResources().getDisplayMetrics().density * ui.scale))
                 - 174
                 - 68);
     setContentView(root);
@@ -279,15 +306,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void heading(String eyebrow, String title) {
+    heading(eyebrow, title, 34);
+  }
+
+  private TextView heading(String eyebrow, String title, int size) {
     if (!eyebrow.isEmpty()) {
       content.addView(ui.text(eyebrow.toUpperCase(Locale.ROOT), 12, TvUi.ACCENT));
       ui.gap(content, 8);
     }
-    content.addView(ui.title(title, 34));
+    TextView heading = ui.title(title, size);
+    content.addView(heading);
     ui.gap(content, 8);
     status = ui.text("", 14, TvUi.MUTED);
     content.addView(status);
     ui.gap(content, 22);
+    return heading;
   }
 
   private void section(String title) {
@@ -404,37 +437,29 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     } else {
       cards.addView(
           ui.card(
-              profileName() + " · Watching",
-              "Ready when you are",
-              "Open your QueuePilot watching queues.",
-              "View your queues",
-              () -> navigate(new Screen("queues")),
-              width));
-      cards.addView(
-          ui.card(
-              "Watching together",
-              "Watch together",
-              "Choose an audience from your QueuePilot queues.",
-              "Explore shared queues",
-              () -> navigate(new Screen("queues")),
-              width));
-      cards.addView(
-          ui.card(
               "Your library",
               "Browse something new",
-              profile.optString("serverName", "Your Plex server"),
+              profile.optString("serverName", "Your media server"),
               "Browse library",
               () -> navigate(new Screen("library", "/library/sections", "Your library", null)),
               width));
+      homeQueueCards(cards, width);
     }
-    ui.primaryCard(cards.getChildAt(0));
-    focusFirst(cards.getChildAt(0));
+    if (profile == null || prefs().getString("queue-origin", "").isEmpty()) {
+      ui.primaryCard(cards.getChildAt(0));
+      focusFirst(cards.getChildAt(0));
+    }
     section("Continue your story");
     if (profile == null) {
       demoHero();
       section("Browse your library");
       demoPosters();
     } else {
+      JSONObject snapshot = queueSnapshot();
+      if (snapshot != null) {
+        content.addView(queueHero(snapshot));
+        ui.gap(content, 16);
+      }
       LinearLayout continuation = ui.column();
       content.addView(continuation);
       TextView loading = ui.text("Finding your next episode…", 16, TvUi.MUTED);
@@ -463,7 +488,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   ui.card(
                       "Library",
                       entry.title(),
-                      "Browse titles on your Plex server.",
+                      "Browse titles on " + profile.optString("serverName", "your server") + ".",
                       "Open library",
                       () -> navigate(new Screen("library", entry.children(), entry.title(), null)),
                       Math.min(250, (mainWidth - 48) / 3)));
@@ -473,6 +498,294 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
               libraries.addView(
                   ui.text("Server unavailable. Try again from Series or Movies.", 15, TvUi.MUTED)));
     }
+  }
+
+  /**
+   * Queues come first on Home: every queue, grouped by the profile it plays as, each with its
+   * audience as text. Without a QueuePilot connection a single card offers to connect one.
+   */
+  private void homeQueueCards(LinearLayout cards, int width) {
+    String origin = prefs().getString("queue-origin", "");
+    if (origin.isEmpty()) {
+      cards.addView(
+          ui.card(
+              "QueuePilot",
+              "Connect your queues",
+              "Your QueuePilot watching queues will appear here.",
+              "Connect QueuePilot",
+              () -> navigate(new Screen("queues")),
+              width),
+          0);
+      return;
+    }
+    int request = generation;
+    // The rows are added where the placeholder sits, above Continue and the library rows.
+    LinearLayout queueArea = ui.column();
+    ViewGroup cardsParent = (ViewGroup) cards.getParent();
+    ViewGroup outer = (ViewGroup) cardsParent.getParent();
+    outer.addView(queueArea, outer.indexOfChild(cardsParent));
+    TextView loading = ui.text("Finding your queues…", 15, TvUi.MUTED);
+    queueArea.addView(loading);
+    loadQueueLists(
+        origin,
+        (all, shown) -> {
+          if (request != generation) return;
+          queueArea.removeAllViews();
+          View first = renderQueueGroups(queueArea, all, shown, origin, true);
+          if (first == null) first = cards.getChildAt(0);
+          focusFirst(first);
+        },
+        error -> {
+          if (request != generation) return;
+          loading.setText("QueuePilot couldn't be reached. Your library is still here.");
+          ui.primaryCard(cards.getChildAt(0));
+          focusFirst(cards.getChildAt(0));
+        });
+  }
+
+  /**
+   * Loads every queue, and the filtered list too when a people filter is active, so the screen
+   * can say how many queues the filter hides.
+   */
+  private void loadQueueLists(
+      String origin,
+      java.util.function.BiConsumer<JSONObject, JSONObject> loaded,
+      java.util.function.Consumer<Exception> failed) {
+    Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
+    fetchQueues(
+        origin,
+        Set.of(),
+        all -> {
+          queuePeople = all.optJSONArray("people");
+          if (queuePeople == null) queuePeople = new JSONArray();
+          if (selected.isEmpty()) loaded.accept(all, all);
+          else fetchQueues(origin, selected, shown -> loaded.accept(all, shown), failed);
+        },
+        failed);
+  }
+
+  /**
+   * Draws the filter notice and the two queue groups. Home uses scrolling rows; Watching uses a
+   * grid. Returns the first queue card, or null when no queue is shown.
+   */
+  private View renderQueueGroups(
+      LinearLayout area, JSONObject all, JSONObject shown, String origin, boolean isRow) {
+    JSONArray allQueues = all.optJSONArray("queues"), shownQueues = shown.optJSONArray("queues");
+    int total = allQueues == null ? 0 : allQueues.length();
+    int count = shownQueues == null ? 0 : shownQueues.length();
+    if (shown != all) {
+      LinearLayout notice = ui.row();
+      notice.setGravity(Gravity.CENTER_VERTICAL);
+      TextView summary = ui.text(QueueList.filterSummary(count, total), 15, TvUi.WHITE);
+      summary.setTag("queue-filter-summary");
+      summary.setPadding(0, 0, dp(14), 0);
+      notice.addView(summary);
+      notice.addView(
+          ui.button(
+              "Clear",
+              () -> {
+                prefs().edit().remove("queue-people").apply();
+                render(current);
+              },
+              false));
+      area.addView(notice);
+      ui.gap(area, 14);
+    }
+    if (all.optBoolean("cached")) {
+      area.addView(ui.text("Saved queues · reconnect to start playback", 14, TvUi.MUTED));
+      ui.gap(area, 10);
+    }
+    List<JSONObject> list = new ArrayList<>();
+    for (int i = 0; i < count; i++) {
+      JSONObject queue = shownQueues.optJSONObject(i);
+      if (queue != null) list.add(queue);
+    }
+    QueueList.Groups<JSONObject> groups =
+        QueueList.group(list, q -> q.optString("requiredProfile"), profileName());
+    View first = null;
+    int columns = columns(3), width = itemWidth(columns);
+    for (int g = 0; g < 2; g++) {
+      List<JSONObject> group = g == 0 ? groups.playsAsActive() : groups.switchesProfile();
+      if (group.isEmpty()) continue;
+      TextView label =
+          ui.text(g == 0 ? "Plays as " + profileName() : "Switches profile", 15, TvUi.ACCENT);
+      area.addView(label);
+      ui.gap(area, 10);
+      LinearLayout row = null;
+      for (int i = 0; i < group.size(); i++) {
+        if (row == null || (!isRow && i % columns == 0)) {
+          if (isRow) {
+            HorizontalScrollView scroll = new HorizontalScrollView(this);
+            scroll.setHorizontalScrollBarEnabled(false);
+            scroll.setClipToPadding(false);
+            row = ui.row();
+            row.setPadding(dp(3), dp(3), dp(3), dp(3));
+            scroll.addView(row);
+            area.addView(scroll);
+          } else {
+            row = ui.row();
+            area.addView(row);
+          }
+          ui.gap(area, 18);
+        }
+        View card = queueCard(group.get(i), g == 1, width, origin);
+        row.addView(card);
+        if (first == null) {
+          first = card;
+          ui.primaryCard(card);
+        }
+      }
+    }
+    if (count == 0)
+      area.addView(
+          ui.text(
+              total == 0
+                  ? "No queues yet. Create one in QueuePilot."
+                  : "No queues match these people. Choose Clear to show all " + total + ".",
+              17,
+              TvUi.MUTED));
+    return first;
+  }
+
+  private LinearLayout queueCard(
+      JSONObject queue, boolean isOtherProfile, int width, String origin) {
+    String kind = queue.optString("kind").equals("rules") ? "Rules" : "Picks";
+    LinearLayout card =
+        ui.card(
+            isOtherProfile ? "Switches to " + queue.optString("requiredProfile") : kind,
+            queue.optString("title", "Movies & Shows"),
+            queueAudience(queue),
+            "Play queue",
+            () -> startNativeQueue(queue),
+            width);
+    LinearLayout faces = ui.row();
+    JSONArray people = queue.optJSONArray("people");
+    if (people != null)
+      for (int j = 0; j < Math.min(4, people.length()); j++) {
+        ImageView face = avatar(36);
+        faces.addView(face);
+        loadQueueAvatar(face, people.optString(j), origin);
+      }
+    card.addView(faces, 1);
+    // Titles repeat, so the spoken name carries the audience and the profile too.
+    card.setContentDescription(
+        queue.optString("title", "Movies & Shows")
+            + ". "
+            + queueAudience(queue)
+            + ". "
+            + (isOtherProfile ? "Switches to " + queue.optString("requiredProfile") : kind)
+            + ". Play queue");
+    return card;
+  }
+
+  /** Reads the queue list, falling back to the last saved copy when QueuePilot is unreachable. */
+  private void fetchQueues(
+      String origin,
+      Set<String> selected,
+      java.util.function.Consumer<JSONObject> loaded,
+      java.util.function.Consumer<Exception> failed) {
+    network.execute(
+        () -> {
+          try {
+            String path =
+                "/api/native/queues?people="
+                    + PlexAccount.encode(String.join(",", new TreeSet<>(selected)));
+            JSONObject response;
+            try {
+              response = NativeQueueApi.request(origin, path, null, "", "");
+              java.nio.file.Files.write(
+                  cacheFile("native-tv", origin, path).toPath(),
+                  response.toString().getBytes(StandardCharsets.UTF_8));
+            } catch (Exception offline) {
+              response =
+                  new JSONObject(
+                      new String(
+                          java.nio.file.Files.readAllBytes(
+                              cacheFile("native-tv", origin, path).toPath()),
+                          StandardCharsets.UTF_8));
+              response.put("cached", true);
+            }
+            JSONObject result = response;
+            runOnUiThread(() -> loaded.accept(result));
+          } catch (Exception error) {
+            runOnUiThread(() -> failed.accept(error));
+          }
+        });
+  }
+
+  private String snapshotKey() {
+    return "queue-snapshot:" + activeId;
+  }
+
+  /** The last queue this profile played and the item it was on, or null. */
+  private JSONObject queueSnapshot() {
+    try {
+      String saved = prefs().getString(snapshotKey(), "");
+      if (saved.isEmpty()) return null;
+      JSONObject snapshot = new JSONObject(saved);
+      return snapshot.optJSONObject("queue") == null || snapshot.optJSONObject("item") == null
+          ? null
+          : snapshot;
+    } catch (Exception e) {
+      return null;
+    }
+  }
+
+  private void saveQueueSnapshot(JSONObject item) {
+    if (nativeQueue == null || item == null) return;
+    try {
+      JSONObject saved = new JSONObject();
+      for (String key : new String[] {"ratingKey", "type", "title", "show", "season", "episode"})
+        if (item.has(key)) saved.put(key, item.get(key));
+      prefs()
+          .edit()
+          .putString(
+              snapshotKey(),
+              new JSONObject().put("queue", nativeQueue).put("item", saved).toString())
+          .apply();
+    } catch (Exception ignored) {
+    }
+  }
+
+  /**
+   * Continues the profile's last queue. It names the queue and the item it was on. Resuming starts
+   * a QueuePilot session, so it needs the QueuePilot server; the card says so rather than imply an
+   * offline resume.
+   */
+  private View queueHero(JSONObject snapshot) {
+    JSONObject queue = snapshot.optJSONObject("queue"), item = snapshot.optJSONObject("item");
+    String type = item.optString("type", "episode"), title = item.optString("title");
+    String show = item.optString("show");
+    int season = item.isNull("season") ? EpisodeLabel.UNKNOWN : item.optInt("season", -1);
+    int episode = item.isNull("episode") ? 0 : item.optInt("episode", 0);
+    LinearLayout hero = ui.column();
+    hero.setPadding(dp(24), dp(20), dp(24), dp(20));
+    hero.setBackground(ui.shape(0xff1d2a17, 0, 12));
+    hero.addView(ui.text(queue.optString("title", "QueuePilot queue"), 13, TvUi.ACCENT));
+    ui.gap(hero, 12);
+    hero.addView(ui.title(EpisodeLabel.primary(type, title, show), 29));
+    String line = EpisodeLabel.secondary(type, season, episode, title);
+    if (!line.isEmpty()) {
+      ui.gap(hero, 10);
+      hero.addView(ui.text(line, 16, TvUi.WHITE));
+    }
+    ui.gap(hero, 10);
+    hero.addView(
+        ui.text(
+            "Where this queue left off. Resuming asks your QueuePilot server for the queue.",
+            14,
+            TvUi.MUTED));
+    ui.gap(hero, 14);
+    TextView resume = ui.button("Resume queue", () -> startNativeQueue(queue), true);
+    resume.setContentDescription(
+        "Resume queue. "
+            + queue.optString("title")
+            + ". "
+            + EpisodeLabel.spoken(type, title, show, season, episode));
+    LinearLayout actions = ui.row();
+    actions.addView(resume);
+    hero.addView(actions);
+    return hero;
   }
 
   private void demoHero() {
@@ -523,8 +836,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   "This is fictional demo artwork. Sign in with Plex to browse and play your"
                       + " library.");
           },
-          TvUi.BG);
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp((mainWidth - 76) / 5), -2);
+          TvUi.BG,
+          0);
+      LinearLayout.LayoutParams lp =
+          new LinearLayout.LayoutParams(dp(itemWidth(columns(5))), -2);
       lp.rightMargin = dp(14);
       row.addView(poster, lp);
     }
@@ -535,20 +850,35 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     hero.setPadding(dp(24), dp(20), dp(24), dp(20));
     hero.setBackground(ui.shape(0xff102430, 0, 12));
     LinearLayout labels = ui.column();
-    labels.addView(ui.text("CONTINUE WATCHING", 12, TvUi.ACCENT));
+    // The media server's own on-deck item: name that source, never imply it is a queue's next
+    // item, and name the server rather than the provider.
+    String source = profile == null ? "" : profile.optString("serverName");
+    String eyebrow = source.isEmpty() ? "" : source.toUpperCase(Locale.ROOT) + " · ";
+    labels.addView(ui.text(eyebrow + "CONTINUE WATCHING", 12, TvUi.ACCENT));
     ui.gap(labels, 12);
-    labels.addView(ui.title(entry.title(), 29));
+    labels.addView(ui.title(entry.primary(), 29));
     ui.gap(labels, 14);
-    if (entry.episode() > 0) labels.addView(ui.text("Episode " + entry.episode(), 16, TvUi.MUTED));
+    String line = episodeLine(entry, "");
+    if (!line.isEmpty()) labels.addView(ui.text(line, 16, TvUi.MUTED));
     ui.gap(labels, 14);
-    labels.addView(
-        ui.button("View title", () -> navigate(new Screen("details", "", "", entry)), true));
+    TextView view =
+        ui.button("View title", () -> navigate(new Screen("details", "", "", entry)), true);
+    view.setContentDescription("View title. " + entry.spoken());
+    labels.addView(view);
     hero.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
     ImageView image = new ImageView(this);
     image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-    hero.addView(image, new LinearLayout.LayoutParams(dp(240), dp(185)));
-    loadArt(image, entry.thumb(), 720);
+    boolean isShowPoster = !entry.posterThumb().equals(entry.thumb());
+    hero.addView(image, new LinearLayout.LayoutParams(dp(isShowPoster ? 124 : 240), dp(185)));
+    loadArt(image, entry.posterThumb(), 720);
     return hero;
+  }
+
+  /** "S1 · E9 · The signal", or the pre-0.5.2 "Episode 9" for a cached entry without a show. */
+  private static String episodeLine(PlexCatalog.Entry entry, String fallback) {
+    if (!entry.type().equals("episode")) return fallback;
+    if (!entry.showTitle().isEmpty()) return entry.secondary();
+    return entry.episode() > 0 ? "Episode " + entry.episode() : fallback;
   }
 
   private void signIn() {
@@ -660,9 +990,14 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         });
   }
 
+  private static String profileBadge(JSONObject user) {
+    if (user.optBoolean("protected")) return "🔒 PIN";
+    return user.optBoolean("admin") ? "Owner" : "";
+  }
+
   private void chooseProfile() {
     shell("");
-    heading("Plex Home", "Who's watching?");
+    heading("", "Who's watching?");
     status.setText("Choose a profile to use its library access.");
     LinearLayout row = horizontal();
     JSONArray users = account.optJSONArray("users");
@@ -671,14 +1006,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         JSONObject user = users.optJSONObject(i);
         if (user == null) continue;
         String name = user.optString("title", user.optString("username", "Profile"));
+        // Only what differs between profiles: a PIN lock, or the account owner.
         LinearLayout profileCard =
             ui.card(
-                user.optBoolean("protected") ? "PIN protected" : "Plex Home",
+                profileBadge(user),
                 name,
                 "",
                 "Choose profile",
                 () -> selectUser(user),
                 220);
+        String badge = profileBadge(user);
+        profileCard.setContentDescription(
+            name + (badge.isEmpty() ? "" : ". " + badge.replace("🔒 ", "")) + ". Choose profile");
         ImageView face = avatar(70);
         loadProfileAvatar(face, user.optString("thumb"));
         profileCard.addView(face, 0);
@@ -689,7 +1028,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         JSONObject p = profiles.optJSONObject(i);
         row.addView(
             ui.card(
-                "Saved profile",
+                "",
                 p.optString("name"),
                 "Available on this device.",
                 "Choose profile",
@@ -1070,9 +1409,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           }
           LinearLayout row = null;
           View first = null;
+          int columns = columns(5);
           for (int i = 0; i < Math.min(30, entries.length()); i++) {
-            if (i % 5 == 0) {
+            if (i % columns == 0) {
               row = ui.row();
+              row.setTag(i == 0 ? "poster-row-first" : null);
               content.addView(row);
               ui.gap(content, 22);
             }
@@ -1106,7 +1447,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private View poster(PlexCatalog.Entry entry) {
     LinearLayout card = ui.column();
     card.setPadding(dp(3), dp(3), dp(3), dp(10));
-    int width = (mainWidth - 76) / 5;
+    int width = itemWidth(columns(5));
     if (entry.type().equals("library")) {
       TextView icon = ui.title("▤", 48);
       icon.setGravity(Gravity.CENTER);
@@ -1116,19 +1457,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       image.setScaleType(ImageView.ScaleType.CENTER_CROP);
       image.setBackgroundColor(TvUi.PANEL);
       card.addView(image, new LinearLayout.LayoutParams(-1, dp(width * 3 / 2)));
-      loadArt(image, entry.thumb(), 720);
+      loadArt(image, entry.posterThumb(), 720);
     }
     ui.gap(card, 10);
-    TextView label = ui.title(entry.title(), 16);
+    TextView label = ui.title(entry.primary(), 16);
     label.setMaxLines(2);
     label.setEllipsize(TextUtils.TruncateAt.END);
     card.addView(label);
     ui.gap(card, 5);
-    card.addView(
-        ui.text(
-            entry.type().equals("episode") ? "Episode " + entry.episode() : entry.type(),
-            12,
-            TvUi.MUTED));
+    TextView detail = ui.text(episodeLine(entry, entry.type()), 12, TvUi.MUTED);
+    detail.setMaxLines(2);
+    detail.setEllipsize(TextUtils.TruncateAt.END);
+    card.addView(detail);
     ui.focusable(
         card,
         () -> {
@@ -1136,8 +1476,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             navigate(new Screen("details", "", "", entry));
           else navigate(new Screen("library", entry.children(), entry.title(), null));
         },
-        TvUi.BG);
-    card.setContentDescription(entry.title());
+        TvUi.BG,
+        0);
+    card.setContentDescription(entry.spoken());
     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(width), -2);
     lp.rightMargin = dp(14);
     card.setLayoutParams(lp);
@@ -1145,15 +1486,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private Bitmap artwork(String origin, String secret, String thumb, int width) throws Exception {
-    if (!thumb.startsWith("/") || thumb.startsWith("//"))
-      throw new IllegalArgumentException("Invalid artwork path");
-    String path =
-        "/photo/:/transcode?width="
-            + width
-            + "&height="
-            + (width * 3 / 2)
-            + "&minSize=1&upscale=0&url="
-            + PlexAccount.encode(thumb);
+    String path = TitleCast.transcodePath(thumb, width);
     byte[] bytes = PlexCatalog.get(PlexCatalog.url(origin, path), secret, 12 * 1024 * 1024);
     BitmapFactory.Options bounds = new BitmapFactory.Options();
     bounds.inJustDecodeBounds = true;
@@ -1184,23 +1517,84 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void details(PlexCatalog.Entry entry) {
     shell("");
-    heading(
-        entry.type().equals("episode") ? "Episode " + entry.episode() : "Your library",
-        entry.title());
+    // Smaller than a screen heading: a long title still fits two lines at 1080p, then ends in an
+    // ellipsis instead of pushing Play below the fold.
+    TextView title =
+        heading(
+            entry.type().equals("episode")
+                ? entry.showTitle().isEmpty() ? "Episode " + entry.episode() : "Episode"
+                : "Your library",
+            entry.primary(),
+            26);
+    title.setTag("details-title");
+    title.setMaxLines(2);
+    title.setEllipsize(TextUtils.TruncateAt.END);
+    if (!entry.showTitle().isEmpty() && entry.type().equals("episode")) {
+      TextView line = ui.text(entry.secondary(), 17, TvUi.WHITE);
+      line.setTag("details-episode");
+      line.setMaxLines(2);
+      line.setEllipsize(TextUtils.TruncateAt.END);
+      content.addView(line);
+      ui.gap(content, 14);
+    }
     LinearLayout row = ui.row();
     ImageView image = new ImageView(this);
     image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-    row.addView(image, new LinearLayout.LayoutParams(dp(210), dp(315)));
+    row.addView(image, new LinearLayout.LayoutParams(dp(180), dp(270)));
     loadArt(image, entry.thumb(), 1440);
     LinearLayout info = ui.column();
-    info.setPadding(dp(28), dp(10), 0, 0);
+    info.setPadding(dp(28), dp(4), 0, 0);
     row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
-    info.addView(ui.text("Watch with " + profileName(), 18, TvUi.MUTED));
-    ui.gap(info, 24);
+    info.addView(ui.text("Watch with " + profileName(), 15, TvUi.MUTED));
+    ui.gap(info, 14);
+    TextView more = null;
+    if (!entry.summary().isBlank()) {
+      TextView summary = ui.text(entry.summary().trim(), 15, TvUi.WHITE);
+      summary.setTag("details-summary");
+      summary.setMaxLines(4);
+      summary.setEllipsize(TextUtils.TruncateAt.END);
+      summary.setLineSpacing(0, 1.12f);
+      info.addView(summary);
+      ui.gap(info, 18);
+      more =
+          ui.button(
+              "More",
+              () ->
+                  panel()
+                      .setTitle(entry.primary())
+                      .setMessage(entry.summary().trim())
+                      .setPositiveButton("Close", null)
+                      .create()
+                      .show(),
+              false);
+      more.setContentDescription("More. Read the full summary");
+      // Offered only when the summary is actually cut off.
+      TextView moreButton = more;
+      moreButton.setVisibility(View.GONE);
+      summary.addOnLayoutChangeListener(
+          (v, l, t, r, b, ol, ot, or, ob) -> {
+            android.text.Layout layout = summary.getLayout();
+            boolean isClamped =
+                layout != null
+                    && layout.getLineCount() > 0
+                    && layout.getEllipsisCount(layout.getLineCount() - 1) > 0;
+            int visibility = isClamped ? View.VISIBLE : View.GONE;
+            if (moreButton.getVisibility() != visibility)
+              moreButton.post(() -> moreButton.setVisibility(visibility));
+          });
+    }
+    LinearLayout actions = ui.row();
     TextView play = ui.button("Play", () -> playEntry(entry), true);
-    info.addView(play);
-    ui.gap(info, 16);
-    info.addView(ui.button("Artwork quality", () -> compareArt(entry), false));
+    actions.addView(play);
+    if (more != null) {
+      LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2);
+      gap.leftMargin = dp(12);
+      actions.addView(more, gap);
+    }
+    LinearLayout.LayoutParams art = new LinearLayout.LayoutParams(-2, -2);
+    art.leftMargin = dp(12);
+    actions.addView(ui.button("Artwork quality", () -> compareArt(entry), false), art);
+    info.addView(actions);
     content.addView(row);
     focusFirst(play);
   }
@@ -1258,7 +1652,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             JSONArray items =
                 PlexCatalog.list(
                     PlexCatalog.get(
-                        PlexCatalog.url(origin, "/library/metadata/" + entry.key()),
+                        PlexCatalog.url(
+                            origin, "/library/metadata/" + entry.key() + "?includeMarkers=1"),
                         secret,
                         16 * 1024 * 1024));
             PlexCatalog.Entry detail = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
@@ -1303,7 +1698,15 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout overlay = ui.column();
     overlay.setPadding(dp(26), dp(18), dp(26), dp(16));
     overlay.setBackgroundColor(0xd0101218);
-    overlay.addView(ui.title(title, 23));
+    TextView playingTitle = ui.title(playingEntry == null ? title : playingEntry.primary(), 23);
+    playingTitle.setTag("playing-title");
+    overlay.addView(playingTitle);
+    String playingLine = playingEntry == null ? "" : episodeLine(playingEntry, "");
+    if (!playingLine.isEmpty()) {
+      TextView episodeText = ui.text(playingLine, 16, TvUi.WHITE);
+      episodeText.setTag("playing-episode");
+      overlay.addView(episodeText);
+    }
     status = ui.text("Opening video…", 13, TvUi.MUTED);
     overlay.addView(status);
     ui.gap(overlay, 10);
@@ -1324,6 +1727,17 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           false);
     ui.action(actions, "Back to title", this::back, false);
     root.addView(overlay, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
+    playingMarkers = playingEntry == null ? List.of() : playingEntry.skipMarkers();
+    skipMarker = null;
+    isSkipDismissed = false;
+    isControllerVisible = false;
+    skipButton = ui.button("Skip Intro", this::skipMarker, true);
+    skipButton.setTag("skip-marker");
+    skipButton.setVisibility(View.GONE);
+    FrameLayout.LayoutParams skipLayout =
+        new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+    skipLayout.setMargins(0, 0, dp(40), dp(130));
+    root.addView(skipButton, skipLayout);
     setContentView(root);
     androidx.media3.datasource.DataSource.Factory dataSourceFactory =
         PlexDataSource.factory(playingOrigin.isEmpty() ? server() : playingOrigin, secret);
@@ -1345,11 +1759,16 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     playerView.setShowSubtitleButton(true);
     installPlaybackMenus();
     roundPlayerControls(playerView);
+    scalePlayerControls(playerView);
     rewind.reset();
     playerView.setControllerShowTimeoutMs(3500);
     playerView.setControllerVisibilityListener(
         (androidx.media3.ui.PlayerView.ControllerVisibilityListener)
-            visibility -> overlay.setVisibility(visibility));
+            visibility -> {
+              overlay.setVisibility(visibility);
+              isControllerVisible = visibility == View.VISIBLE;
+              updateSkip();
+            });
     player.addListener(
         new Player.Listener() {
           @Override
@@ -1366,9 +1785,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                 reportPlayback("paused");
               } else {
                 long currentPosition = player.getCurrentPosition(),
-                    resumePosition =
-                        rewind.resume(
-                            currentPosition, sectionFloor, prefs().getInt("rewind-seconds", 3));
+                    resumePosition = rewind.resume(currentPosition, sectionFloor, rewindSeconds());
                 if (resumePosition != currentPosition) player.seekTo(resumePosition);
                 if (player.getPlaybackState() == Player.STATE_READY) reportPlayback("playing");
               }
@@ -1403,7 +1820,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             .setUri(url)
             .setMediaId(playingEntry == null ? "video" : playingEntry.key())
             .setMediaMetadata(
-                new androidx.media3.common.MediaMetadata.Builder().setTitle(title).build())
+                new androidx.media3.common.MediaMetadata.Builder()
+                    .setTitle(playingEntry == null ? title : playingEntry.primary())
+                    .setSubtitle(playingEntry == null ? null : playingEntry.secondary())
+                    .build())
             .build());
     player.prepare();
     player.play();
@@ -1425,6 +1845,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
               loadNativeItem();
               return;
             }
+            updateSkip();
             long now = android.os.SystemClock.elapsedRealtime();
             if (now - reportedAt >= 10000) {
               reportPlayback(player.isPlaying() ? "playing" : "paused");
@@ -1434,6 +1855,65 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           }
         },
         250);
+  }
+
+  private long playingDuration() {
+    long duration = player == null ? -1 : player.getDuration();
+    if (duration > 0) return duration;
+    return playingEntry == null ? -1 : playingEntry.duration();
+  }
+
+  /**
+   * Shows Skip Intro or Skip Credits while the position is inside a Plex marker, and pulls focus
+   * to it once per marker. It hides after a few seconds unless the controls are showing, and when
+   * playback leaves the marker. Nothing is skipped without the viewer pressing it.
+   */
+  private void updateSkip() {
+    if (skipButton == null || player == null) return;
+    MarkerSkip.Marker marker =
+        MarkerSkip.active(playingMarkers, player.getCurrentPosition(), sectionFloor, sectionEnd);
+    long now = SystemClock.elapsedRealtime();
+    boolean isShown = skipButton.getVisibility() == View.VISIBLE;
+    if (marker == null) {
+      skipMarker = null;
+      isSkipDismissed = false;
+      if (isShown) hideSkip();
+      return;
+    }
+    if (!marker.equals(skipMarker)) {
+      skipMarker = marker;
+      isSkipDismissed = false;
+      showSkip(marker, true);
+    } else if (isShown && !isControllerVisible && now - skipShownAt >= MarkerSkip.VISIBLE_MS) {
+      isSkipDismissed = true;
+      hideSkip();
+    } else if (!isShown && isSkipDismissed && isControllerVisible) {
+      showSkip(marker, false);
+    }
+  }
+
+  private void showSkip(MarkerSkip.Marker marker, boolean isFocusPulled) {
+    skipButton.setText(MarkerSkip.label(marker));
+    skipButton.setContentDescription(MarkerSkip.label(marker));
+    skipButton.setVisibility(View.VISIBLE);
+    skipShownAt = SystemClock.elapsedRealtime();
+    if (isFocusPulled) skipButton.requestFocus();
+  }
+
+  private void hideSkip() {
+    boolean hadFocus = skipButton.hasFocus();
+    skipButton.setVisibility(View.GONE);
+    if (hadFocus && playerView != null) playerView.requestFocus();
+  }
+
+  private void skipMarker() {
+    if (player == null || skipMarker == null) return;
+    long target = MarkerSkip.target(skipMarker, playingDuration(), sectionFloor, sectionEnd);
+    // Landing on the end of the item or section reuses the normal completion path: Plex gets a
+    // finished timeline and a queue reports the item complete and moves on.
+    hideSkip();
+    skipMarker = null;
+    player.seekTo(target);
   }
 
   private void demoSeason() {
@@ -1457,7 +1937,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
               () -> {
                 TvPanel d =
                     panel()
-                        .setTitle(item.label() + " · " + item.title())
+                        .setTitle("Orbit Nine · " + item.label() + " · " + item.title())
                         .setMessage(
                             "This fictional sequence demonstrates ordering and profile progress. It"
                                 + " doesn't play library media.")
@@ -1498,89 +1978,26 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
     Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
     ui.action(content, "Choose people", this::chooseQueuePeople, false);
-    status.setText(selected.isEmpty() ? "All Plex queues · loading…" : "Finding your Plex queues…");
+    status.setText(selected.isEmpty() ? "All queues · loading…" : "Finding your queues…");
+    LinearLayout area = ui.column();
+    ui.gap(content, 16);
+    content.addView(area);
     int request = generation;
-    network.execute(
-        () -> {
-          try {
-            String path =
-                "/api/native/queues?people="
-                    + PlexAccount.encode(String.join(",", new TreeSet<>(selected)));
-            JSONObject response;
-            try {
-              response = NativeQueueApi.request(origin, path, null, "", "");
-              java.nio.file.Files.write(
-                  cacheFile("native-tv", origin, path).toPath(),
-                  response.toString().getBytes(StandardCharsets.UTF_8));
-            } catch (Exception offline) {
-              response =
-                  new JSONObject(
-                      new String(
-                          java.nio.file.Files.readAllBytes(
-                              cacheFile("native-tv", origin, path).toPath()),
-                          StandardCharsets.UTF_8));
-              response.put("cached", true);
-            }
-            JSONObject result = response;
-            runOnUiThread(
-                () -> {
-                  if (request != generation) return;
-                  queuePeople = result.optJSONArray("people");
-                  if (queuePeople == null) queuePeople = new JSONArray();
-                  JSONArray queues = result.optJSONArray("queues");
-                  status.setText(
-                      (result.optBoolean("cached")
-                              ? "Saved queues · reconnect to start playback · "
-                              : "")
-                          + (selected.isEmpty() ? "All people" : selectedPeopleLabel(selected))
-                          + " · "
-                          + (queues == null ? 0 : queues.length())
-                          + " Plex queues");
-                  if (queues == null || queues.length() == 0) {
-                    content.addView(
-                        ui.text(
-                            "No matching queues. Choose different people or clear the filter.",
-                            17,
-                            TvUi.MUTED));
-                    return;
-                  }
-                  LinearLayout row = null;
-                  for (int i = 0; i < queues.length(); i++) {
-                    if (i % 3 == 0) {
-                      row = ui.row();
-                      content.addView(row);
-                      ui.gap(content, 18);
-                    }
-                    JSONObject queue = queues.optJSONObject(i);
-                    if (queue == null) continue;
-                    LinearLayout card =
-                        ui.card(
-                            queue.optString("kind").equals("rules") ? "Rules" : "Picks",
-                            queue.optString("title", "Movies & Shows"),
-                            queueAudience(queue),
-                            "Play queue",
-                            () -> startNativeQueue(queue),
-                            (mainWidth - 48) / 3);
-                    LinearLayout faces = ui.row();
-                    JSONArray people = queue.optJSONArray("people");
-                    if (people != null)
-                      for (int j = 0; j < Math.min(4, people.length()); j++) {
-                        String id = people.optString(j);
-                        ImageView face = avatar(36);
-                        faces.addView(face);
-                        loadQueueAvatar(face, id, origin);
-                      }
-                    card.addView(faces, 1);
-                    row.addView(card);
-                  }
-                });
-          } catch (Exception error) {
-            runOnUiThread(
-                () -> {
-                  if (request == generation)
-                    status.setText("QueuePilot couldn't load the TV queues. " + error.getMessage());
-                });
-          }
+    loadQueueLists(
+        origin,
+        (all, shown) -> {
+          if (request != generation) return;
+          JSONArray queues = shown.optJSONArray("queues");
+          status.setText(
+              (selected.isEmpty() ? "All people" : selectedPeopleLabel(selected))
+                  + " · "
+                  + (queues == null ? 0 : queues.length())
+                  + " queues");
+          renderQueueGroups(area, all, shown, origin, false);
+        },
+        error -> {
+          if (request == generation)
+            status.setText("QueuePilot couldn't load the TV queues. " + error.getMessage());
         });
   }
 
@@ -1593,12 +2010,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return String.join(" + ", names);
   }
 
+  /** Who the queue is for, in the web app's text form: "Ada, Grace". */
   private String queueAudience(JSONObject queue) {
-    Set<String> ids = new HashSet<>();
+    List<String> names = new ArrayList<>();
     JSONArray list = queue.optJSONArray("people");
-    if (list != null) for (int i = 0; i < list.length(); i++) ids.add(list.optString(i));
-    String people = selectedPeopleLabel(ids);
-    return people.isEmpty() ? "For everyone" : people;
+    if (list != null)
+      for (int i = 0; i < list.length(); i++) {
+        String id = list.optString(i), name = id;
+        for (int j = 0; queuePeople != null && j < queuePeople.length(); j++) {
+          JSONObject person = queuePeople.optJSONObject(j);
+          if (person != null && id.equals(person.optString("id")))
+            name = person.optString("displayName", id);
+        }
+        names.add(name);
+      }
+    return QueueList.audience(names);
   }
 
   private void chooseQueuePeople() {
@@ -1744,6 +2170,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                 () -> {
                   if (request != generation) return;
                   nativePlan = plan;
+                  nativeQueue = queue;
                   nativeIndex = plan.optInt("cursor");
                   nativeSequence = plan.optLong("sequence");
                   loadNativeItem();
@@ -1786,6 +2213,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     if (continuationRequest != generation || nativePlan != previous) return;
                     if (next.optBoolean("complete")) {
                       nativePlan = null;
+                      // A finished queue has nothing to continue on Home.
+                      prefs().edit().remove(snapshotKey()).apply();
                       render(new Screen("queues"));
                     } else {
                       try {
@@ -1811,6 +2240,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       return;
     }
     JSONObject item = items.optJSONObject(nativeIndex);
+    saveQueueSnapshot(item);
     int request = generation;
     String defaultOrigin = server(), defaultToken = token();
     String serverId = item.optString("plexServer", nativePlan.optString("homeServerId"));
@@ -1852,7 +2282,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     PlexCatalog.list(
                             PlexCatalog.get(
                                 PlexCatalog.url(
-                                    origin, "/library/metadata/" + item.getString("ratingKey")),
+                                    origin,
+                                    "/library/metadata/"
+                                        + item.getString("ratingKey")
+                                        + "?includeMarkers=1"),
                                 secret,
                                 16 * 1024 * 1024))
                         .getJSONObject(0));
@@ -1929,7 +2362,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void settings() {
     shell("Settings");
     heading("QueuePilot TV", "Settings");
-    status.setText("Playback preview · 0.4.0");
+    status.setText("Playback preview · " + versionName());
     LinearLayout row = horizontal();
     row.addView(
         ui.card(
@@ -1956,15 +2389,89 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             () -> navigate(new Screen("profiles")),
             270));
     ui.gap(content, 22);
+    LinearLayout preferences = ui.row();
     TextView rewindButton = ui.button(rewindLabel(), this::rewindSetting, false);
     rewindButton.setTag("rewind-setting");
-    content.addView(rewindButton);
+    preferences.addView(rewindButton);
+    TextView sizeButton =
+        ui.button(
+            "Display size · " + DisplaySize.label(displayPercent()),
+            this::displaySizeSetting,
+            false);
+    LinearLayout.LayoutParams sizeGap = new LinearLayout.LayoutParams(-2, -2);
+    sizeGap.leftMargin = dp(12);
+    preferences.addView(sizeButton, sizeGap);
+    content.addView(preferences);
     focusFirst(row.getChildAt(0));
   }
 
+  /**
+   * Media3 sizes its controller from its own resources, so the Display size is applied by
+   * scaling each control group about the edge it is anchored to. The overlay text and the Skip
+   * button are built with TvUi and already follow the size.
+   */
+  private void scalePlayerControls(PlayerView view) {
+    if (ui.scale == 1f) return;
+    int[][] groups = {
+      {androidx.media3.ui.R.id.exo_center_controls, Gravity.CENTER},
+      {androidx.media3.ui.R.id.exo_time, Gravity.START | Gravity.BOTTOM},
+      {androidx.media3.ui.R.id.exo_basic_controls, Gravity.END | Gravity.BOTTOM},
+      {androidx.media3.ui.R.id.exo_extra_controls, Gravity.END | Gravity.BOTTOM},
+    };
+    for (int[] group : groups) {
+      View control = view.findViewById(group[0]);
+      if (control == null) continue;
+      control.addOnLayoutChangeListener(
+          (v, l, t, r, b, ol, ot, or, ob) -> {
+            boolean isStart = (group[1] & Gravity.START) == Gravity.START,
+                isEnd = (group[1] & Gravity.END) == Gravity.END;
+            v.setPivotX(isStart ? 0 : isEnd ? v.getWidth() : v.getWidth() / 2f);
+            v.setPivotY(group[1] == Gravity.CENTER ? v.getHeight() / 2f : v.getHeight());
+          });
+      control.setScaleX(ui.scale);
+      control.setScaleY(ui.scale);
+    }
+  }
+
+  private void displaySizeSetting() {
+    String[] choices = new String[DisplaySize.CHOICES.length];
+    for (int i = 0; i < choices.length; i++) choices[i] = DisplaySize.label(DisplaySize.CHOICES[i]);
+    TvPanel dialog =
+        panel()
+            .setTitle("Display size")
+            .setMessage(
+                "Make everything smaller to fit more on screen, or larger to read it from"
+                    + " farther away.")
+            .setSelected(java.util.Arrays.binarySearch(DisplaySize.CHOICES, displayPercent()))
+            .setItems(
+                choices,
+                (d, i) -> {
+                  prefs().edit().putInt(DisplaySize.PREFERENCE_KEY, DisplaySize.CHOICES[i]).apply();
+                  // Applies at once: every later view, panel, and grid reads the new size.
+                  ui = new TvUi(this);
+                  getWindow().getDecorView().post(() -> render(current));
+                })
+            .setNegativeButton("Cancel", null)
+            .create();
+    dialog.show();
+    dialog.setPanelSize(dp(330), -2);
+  }
+
+  /** The installed version, so Settings never shows a stale hand-written number. */
+  private String versionName() {
+    try {
+      return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+    } catch (Exception e) {
+      return "";
+    }
+  }
+
+  private int rewindSeconds() {
+    return prefs().getInt(RewindOnResume.PREFERENCE_KEY, RewindOnResume.DEFAULT_SECONDS);
+  }
+
   private String rewindLabel() {
-    int seconds = prefs().getInt("rewind-seconds", 3);
-    return "Rewind on resume · " + (seconds == 0 ? "Off" : seconds + " seconds");
+    return "Rewind on resume · " + RewindOnResume.label(rewindSeconds());
   }
 
   private void rewindSetting() {
@@ -1974,11 +2481,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         panel()
             .setTitle("Rewind on resume")
             .setMessage("Replay a little when you continue after pausing.")
-            .setSelected(java.util.Arrays.binarySearch(values, prefs().getInt("rewind-seconds", 3)))
+            .setSelected(java.util.Arrays.binarySearch(values, rewindSeconds()))
             .setItems(
                 choices,
                 (d, i) -> {
-                  prefs().edit().putInt("rewind-seconds", values[i]).apply();
+                  prefs().edit().putInt(RewindOnResume.PREFERENCE_KEY, values[i]).apply();
                   TextView button = getWindow().getDecorView().findViewWithTag("rewind-setting");
                   if (button != null) button.setText(rewindLabel());
                 })
@@ -2011,22 +2518,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     network.execute(
         () -> {
           try {
-            byte[] bytes =
-                secret.isEmpty()
-                    ? AvatarImage.get(address)
-                    : PlexCatalog.get(address, secret, 4 * 1024 * 1024);
-            BitmapFactory.Options bounds = new BitmapFactory.Options();
-            bounds.inJustDecodeBounds = true;
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
-            if (bounds.outWidth <= 0
-                || bounds.outWidth > 4096
-                || bounds.outHeight <= 0
-                || bounds.outHeight > 6144) return;
-            BitmapFactory.Options options = new BitmapFactory.Options();
-            options.inSampleSize = 1;
-            while (bounds.outWidth / options.inSampleSize > 512)
-              options.inSampleSize = options.inSampleSize == 0 ? 2 : options.inSampleSize * 2;
-            Bitmap image = BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
+            Bitmap image =
+                portrait(
+                    secret.isEmpty()
+                        ? AvatarImage.get(address)
+                        : PlexCatalog.get(address, secret, 4 * 1024 * 1024));
+            if (image == null) return;
             runOnUiThread(
                 () -> {
                   if (request == generation) face.setImageBitmap(image);
@@ -2034,6 +2531,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           } catch (Exception ignored) {
           }
         });
+  }
+
+  /** Decodes a bounded portrait, downsampled to at most 512 pixels wide. */
+  private static Bitmap portrait(byte[] bytes) {
+    BitmapFactory.Options bounds = new BitmapFactory.Options();
+    bounds.inJustDecodeBounds = true;
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+    if (bounds.outWidth <= 0
+        || bounds.outWidth > 4096
+        || bounds.outHeight <= 0
+        || bounds.outHeight > 6144) return null;
+    BitmapFactory.Options options = new BitmapFactory.Options();
+    options.inSampleSize = 1;
+    while (bounds.outWidth / options.inSampleSize > 512) options.inSampleSize *= 2;
+    return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
   }
 
   private void loadProfileAvatar(ImageView face, String thumb) {
@@ -2058,6 +2570,94 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void showCast(PlexCatalog.Entry entry) {
+    if (entry == null
+        || TitleCast.inheritedKeys(entry.type(), entry.seasonKey(), entry.showKey()).isEmpty()) {
+      castDialog(entry);
+      return;
+    }
+    if (isCastLoading) return;
+    isCastLoading = true;
+    String origin = playingOrigin, secret = playingToken;
+    int request = generation;
+    network.execute(
+        () -> {
+          PlexCatalog.Entry complete = withInheritedCast(entry, origin, secret);
+          runOnUiThread(
+              () -> {
+                isCastLoading = false;
+                if (request != generation) return;
+                if (playingEntry == entry) playingEntry = complete;
+                castDialog(complete);
+              });
+        });
+  }
+
+  /**
+   * Adds the season's and show's credits after the episode's own. Uses only the server
+   * connection that is playing the episode; a missing parent leaves the episode's credits.
+   */
+  private PlexCatalog.Entry withInheritedCast(
+      PlexCatalog.Entry entry, String origin, String secret) {
+    List<JSONObject> credits = new ArrayList<>();
+    collectCredits(credits, entry.roles());
+    for (String key : TitleCast.inheritedKeys(entry.type(), entry.seasonKey(), entry.showKey())) {
+      try {
+        JSONArray parents =
+            PlexCatalog.list(
+                PlexCatalog.get(
+                    PlexCatalog.url(origin, "/library/metadata/" + key), secret, 16 * 1024 * 1024));
+        if (parents.length() > 0)
+          collectCredits(credits, parents.getJSONObject(0).optJSONArray("roles"));
+      } catch (Exception ignored) {
+      }
+    }
+    return entry.withCast(
+        new JSONArray(
+            TitleCast.distinct(
+                credits,
+                credit -> TitleCast.identity(credit.optString("kind"), credit.optString("name")))));
+  }
+
+  private static void collectCredits(List<JSONObject> credits, JSONArray roles) {
+    if (roles == null) return;
+    for (int i = 0; i < roles.length(); i++) {
+      JSONObject credit = roles.optJSONObject(i);
+      if (credit != null) credits.add(credit);
+    }
+  }
+
+  private void loadCastPhoto(ImageView face, String thumb, String name) {
+    boolean isExternal = TitleCast.isExternalPhoto(thumb);
+    if (!isExternal && !(thumb.startsWith("/") && !thumb.startsWith("//"))) return;
+    String origin = playingOrigin, secret = playingToken;
+    int request = generation;
+    network.execute(
+        () -> {
+          Bitmap image = null;
+          try {
+            // The server resizes its own paths and proxies external portraits.
+            image = artwork(origin, secret, thumb, 360);
+          } catch (Exception ignored) {
+          }
+          if (image == null && isExternal) {
+            try {
+              // Credential-free fallback straight to the portrait host.
+              image = portrait(AvatarImage.get(thumb));
+            } catch (Exception ignored) {
+            }
+          }
+          if (image == null) return;
+          Bitmap loaded = image;
+          runOnUiThread(
+              () -> {
+                if (request != generation) return;
+                face.setImageBitmap(loaded);
+                face.setContentDescription("Photo of " + name);
+              });
+        });
+  }
+
+  private void castDialog(PlexCatalog.Entry entry) {
     if (entry == null || entry.roles().length() == 0) {
       message("Title cast", "No cast information is available for this title.");
       return;
@@ -2078,22 +2678,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       LinearLayout card = ui.column();
       ImageView face = avatar(100);
       card.addView(face);
-      String thumb = actor.optString("thumb");
-      if (thumb.startsWith("/")) {
-        String origin = playingOrigin, secret = playingToken;
-        int request = generation;
-        network.execute(
-            () -> {
-              try {
-                Bitmap image = artwork(origin, secret, thumb, 360);
-                runOnUiThread(
-                    () -> {
-                      if (request == generation) face.setImageBitmap(image);
-                    });
-              } catch (Exception ignored) {
-              }
-            });
-      } else if (thumb.startsWith("https://")) loadPicture(face, thumb, "");
+      loadCastPhoto(face, actor.optString("thumb"), actor.optString("name"));
       ui.gap(card, 10);
       card.addView(ui.title(actor.optString("name"), 15));
       ui.gap(card, 5);
@@ -2107,7 +2692,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
     TvPanel dialog =
         panel()
-            .setTitle("Cast · " + entry.title())
+            .setTitle(
+                "Cast · "
+                    + entry.primary()
+                    + (entry.showTitle().isEmpty() ? "" : " · " + entry.secondary()))
             .setView(scroll)
             .setPositiveButton("Close", null)
             .create();
@@ -2460,6 +3048,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void releasePlayer() {
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    skipButton = null;
     if (player != null) {
       if (!advancing) reportPlayback("stopped");
       if (mediaSession != null) {
