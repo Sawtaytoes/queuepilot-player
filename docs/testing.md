@@ -54,7 +54,8 @@ blocks the browser remote. It then installs the checkout's debug APK, starts
 `tools/fixture_server.py` with `FIXTURE_ROOT`, and runs the checks: the emulator-only hierarchy
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
-`rail_smoke.py` (240 and 320), `details_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
+`rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, and
+`layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
@@ -121,6 +122,20 @@ show facts above Orbit Nine's seasons; checks that every visible player control 
 icon button; and seeks the time bar with the D-pad. The fixture serves a seven-frame BIF for
 the episode's Part, so the preview must show the frame for the time it names, sit above the
 bar inside the screen, and be fetched once, on the first seek and not before.
+
+`queue_history_smoke.py` follows the details check. The fixture serves three invented queues
+through `GET /api/native/queues/:setId/full`: an episode queue (list layout) with a special,
+an authored section and a Plex-history entry, a movie queue (grid layout), and a Rules queue
+(its lineup only). It checks that the list opens at the next item with three watched items
+folded, the order of the lineup start, its end line and the following entry, the
+watched/in-progress/next badges, the Plex-history entry's refusal to mark, a watched mark and
+its reversal through `POST .../watched`, **Play only this item** and **Start here, then
+continue** with the exact `start` body sent to `POST /api/native/sessions`, the player's Full
+queue action, the grid at 100% and 125% Display size (fewer columns at 125%), the Rules
+queue's missing Start here and its reason, and the profile-switch notice. Then History:
+`GET /api/native/history?days=30` grouped by queue and sitting, the "about" time of a play
+recorded before exact times, the sitting panel, and the 7-day period. `rail_smoke.py` counts
+History among the rail entries.
 
 ## Lucide icons
 

@@ -28,6 +28,24 @@ card. Back returns to the preceding screen. Libraries use square-cornered artwor
 and configuration dialogs use bounded widths. **Explore the demo** opens a fictional
 catalog for reviewing the same native layout without an account.
 
+Every queue card, the Home resume card, and the player's queue controls have a **Full queue**
+action. It lists the whole ordered queue from the QueuePilot engine, not only tonight's lineup.
+The server chooses the layout from the content: a list for a queue of mostly episodes, an
+artwork grid for a queue of mostly movies. Each item shows whether it is watched, in progress,
+or not watched, and the next item is marked. A line shows where tonight's lineup ends. The
+list opens at the next item with the watched items folded into one row; the grid keeps watched
+cards in place, dimmed. Select an item for **Start here, then continue**, **Play only this
+item**, or **Mark watched** / **Mark unwatched**. Starting at an item never marks the earlier
+items watched. A Rules queue chooses its own order, so it lists its current lineup and offers
+no Start here. An item whose watched state the media server keeps cannot be marked from the
+TV, and its panel says so.
+
+**History** on the rail shows the profile's watching by queue, then by sitting (a queue's plays
+less than 75 minutes apart), then what was watched in it. It includes plays in other apps only
+when a queue tracks them. A time recorded before exact times were kept reads "about". Select a
+sitting to continue its queue, play one of its items again, or open the full queue. Choose
+7, 30, 90, or 365 days.
+
 **Display size** in Settings scales the whole interface to 70, 80, 90, 100, 110 or 125
 percent, and applies at once. Grids gain columns at smaller sizes. The Media3 control groups
 are scaled about their anchored edge. The title screen keeps a long title to two lines and a
@@ -41,7 +59,8 @@ season's episode list start with the same facts for that show or season.
 Icons are [Lucide](https://lucide.dev) icons, vendored as Android vector drawables from
 the pinned `lucide-static` release under its ISC license (`tools/lucide/LICENSE`). They mark
 the rail, the player controls, Skip, the Settings rows, the queue card labels, and the title
-actions. Each one sits beside a text label or carries a spoken name.
+actions, the full queue and its item panel, and the history. Each one sits beside a text label
+or carries a spoken name.
 
 Credentials and the profile roster are encrypted with Android Keystore. Previously connected
 unprotected profiles can use their saved server credentials and catalog cache without a
@@ -131,7 +150,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.3.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.5.4.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
 without involving a household TV; `tools/tv-lab.sh test` runs them there.
 

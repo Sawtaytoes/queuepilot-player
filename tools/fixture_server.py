@@ -48,6 +48,58 @@ def films():
 MARKERS='<Marker type="intro" startTimeOffset="6000" endTimeOffset="14000"/><Marker type="credits" startTimeOffset="18000" endTimeOffset="21000"/><Marker type="credits" final="1" startTimeOffset="25000" endTimeOffset="30000"/>'
 # Reserved example domain: the guest has no route to it, so only the server transcoder can serve it.
 EXTERNAL_PORTRAIT='https://images.example.com/portraits/omar.jpg'
+# The full queue, history and watched-mark routes (QueuePilot's /api/native). Invented queues:
+# an episode queue (list layout), a movie queue (grid layout) and a Rules queue (lineup only).
+def _episode(position,key,show,season,episode,title,state='unwatched',offset=0,lineup=None,next_=False,owned=True,special=False,duration=1440000):
+    return {'position':position,'ratingKey':str(key),'serverId':'fixture-server','plexServer':None,'title':title,'type':'episode','show':show,'season':season,'episode':episode,'isSpecial':special,'durationMs':duration,'state':state,'offsetMs':offset,'section':None,'lineupIndex':lineup,'isNext':next_,'canMarkWatched':owned,'artwork':{'thumb':'/art/poster.jpg','parentThumb':None,'grandparentThumb':'/art/poster.jpg','art':None}}
+def _film(position,key,state='unwatched',offset=0,lineup=None,next_=False,owned=True,section=None):
+    title=next(t for k,t,_ in FILMS if k==key)
+    return {'position':position,'ratingKey':str(key),'serverId':'fixture-server','plexServer':None,'title':title,'type':'movie','show':None,'season':None,'episode':None,'isSpecial':False,'durationMs':6720000,'state':state,'offsetMs':offset,'section':section,'lineupIndex':lineup,'isNext':next_,'canMarkWatched':owned,'artwork':{'thumb':'/art/poster.jpg','parentThumb':None,'grandparentThumb':None,'art':None}}
+def _entry(key,title,kind,history,items,lane='pool'):
+    return {'entryKey':key,'title':title,'type':kind,'lane':lane,'watchHistory':history,'isShuffled':False,'isUnresolved':False,'items':items}
+def full_queues():
+    wild=_film(9,312,section={'startMs':2470000,'endMs':3510000});wild.update(title='The river crossing',durationMs=3600000)
+    return {
+        'ada-watch':{'setId':'ada-watch','kind':'picks','layout':'list','isWholeQueue':True,'isLineupShuffled':False,'lineup':{'count':4,'endPosition':6},'isTruncated':False,'entries':[
+            _entry('orbit-nine-s1','Orbit Nine · Season 1','show','queue',[
+                _episode(0,2006,'Orbit Nine',1,6,'The long night','watched'),_episode(1,2007,'Orbit Nine',1,7,'Drift','watched'),_episode(2,2008,'Orbit Nine',1,8,'Old friends','watched'),
+                _episode(3,102,'Orbit Nine',1,9,'The signal','in_progress',840000,0,True),_episode(4,2100,'Orbit Nine',0,1,'A day between stars',lineup=1,special=True,duration=1080000),
+                _episode(5,2010,'Orbit Nine',1,10,'Beyond the orbit',lineup=2)]),
+            _entry('harbor-lights-s2','Harbor Lights · Season 2','show','provider',[
+                _episode(6,103,'Harbor Lights',2,3,'The return',lineup=3,owned=False,duration=2760000),_episode(7,2204,'Harbor Lights',2,4,'Fog warning',owned=False,duration=2760000),_episode(8,2205,'Harbor Lights',2,5,'Lights out',owned=False,duration=2760000)]),
+            _entry('wild-current','Wild Current · The river crossing','movie','queue',[wild])]},
+        'friends-watch':{'setId':'friends-watch','kind':'picks','layout':'grid','isWholeQueue':True,'isLineupShuffled':False,'lineup':{'count':2,'endPosition':3},'isTruncated':False,'entries':[
+            _entry('friday-films','Friday films','collection','queue',[_film(0,303,'watched'),_film(1,304,'watched'),_film(2,302,'in_progress',4440000,0,True),_film(3,305,lineup=1)]),
+            _entry('lantern-pictures','Lantern Pictures','collection','queue',[_film(4+i,k) for i,k in enumerate([306,307,308,309,310,311,301])])]},
+        'movies-ada':{'setId':'movies-ada','kind':'rules','layout':'grid','isWholeQueue':False,'isLineupShuffled':True,'lineup':{'count':3,'endPosition':2},'isTruncated':False,'entries':[
+            _entry(None,'Movies','lineup','provider',[_film(0,307,lineup=0,next_=True,owned=False),_film(1,308,lineup=1,owned=False),_film(2,309,lineup=2,owned=False)])]},
+    }
+queue_marks={}
+native_starts=[]
+history_requests=[]
+def full_queue(set_id):
+    full=full_queues().get(set_id)
+    if not full:return None
+    for entry in full['entries']:
+        for item in entry['items']:
+            mark=queue_marks.get((set_id,item['ratingKey']))
+            if mark is not None:item.update(state='watched' if mark else 'unwatched',offsetMs=0)
+    return full
+def history(days):
+    now=int(time.time()*1000);hour=3600000
+    def item(set_id,entry,key,title,show,season,episode,kind,start,end,state,position,duration,source='native-tv',approximate=False):
+        return {'setId':set_id,'entryKey':entry,'ratingKey':str(key),'plexServer':None,'title':title,'show':show,'season':season,'episode':episode,'type':kind,'startedAt':start,'endedAt':end,'state':state,'positionMs':position,'durationMs':duration,'source':source,'isTimeApproximate':approximate}
+    queues=[
+        {'setId':'ada-watch','title':'Movies & Shows','lastWatchedAt':now-2*hour,'sittings':[
+            {'startedAt':now-3*hour,'endedAt':now-2*hour,'items':[item('ada-watch','orbit-nine-s1',2008,'Old friends','Orbit Nine',1,8,'episode',now-3*hour,now-3*hour+1440000,'finished',1440000,1440000),item('ada-watch','orbit-nine-s1',102,'The signal','Orbit Nine',1,9,'episode',now-3*hour+1500000,now-2*hour,'partial',893000,1440000)]},
+            {'startedAt':now-27*hour,'endedAt':now-26*hour,'items':[item('ada-watch','orbit-nine-s1',2006,'The long night','Orbit Nine',1,6,'episode',now-27*hour,now-27*hour+1440000,'finished',1440000,1440000),item('ada-watch','orbit-nine-s1',2007,'Drift','Orbit Nine',1,7,'episode',now-27*hour+1500000,now-26*hour,'finished',1440000,1440000,'queue-ledger')]}]},
+        {'setId':'friends-watch','title':'Movies & Shows · 2','lastWatchedAt':now-50*hour,'sittings':[
+            {'startedAt':now-52*hour,'endedAt':now-50*hour,'items':[item('friends-watch','friday-films',303,'Paper Moons',None,None,None,'movie',now-52*hour,now-50*hour,'finished',6720000,6720000,approximate=True)]}]}]
+    since=now-days*86400000
+    for queue in queues:queue['sittings']=[x for x in queue['sittings'] if x['startedAt']>=since]
+    return {'profile':{'uuid':'ada','name':'Ada'},'sittingGapMinutes':75,'since':since,'queues':[q for q in queues if q['sittings']]}
+def is_native_profile(handler):return handler.headers.get('X-Plex-Profile-Token') in ('fixture-user-ada','fixture-root')
+
 users = [{'id':1,'uuid':'ada','title':'Ada','protected':False,'admin':True,'thumb':'/avatars/ada.jpg'}, {'id':2,'uuid':'grace','title':'Grace','protected':False,'thumb':'/avatars/grace.jpg'}, {'id':3,'uuid':'morgan','title':'Morgan','protected':True,'thumb':'/avatars/nadia.jpg'}]
 
 class Handler(BaseHTTPRequestHandler):
@@ -64,7 +116,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
         if path=='/_markers': markers=True;self.respond('ok');return
         if path=='/_online': video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
-        if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();self.respond('ok');return
+        if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
         if path=='/_cloud_offline': cloud_offline=True;self.respond('ok');return
         if path=='/_expire_next': expire_next=True;self.respond('ok');return
@@ -75,8 +127,30 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/native/'):
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
             value=json.loads(body or '{}')
+            if path.startswith('/api/native/queues/') and path.endswith('/watched'):
+                if not is_native_profile(self):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
+                set_id=path.split('/')[4];full=full_queue(set_id)
+                if not full:self.respond(json.dumps({'error':'Unknown queue'}),'application/json',404);return
+                entry=next((e for e in full['entries'] if e['entryKey']==value.get('entryKey')),None)
+                if not entry or not any(i['ratingKey']==value.get('ratingKey') for i in entry['items']):self.respond(json.dumps({'error':'Unknown item'}),'application/json',404);return
+                if entry['watchHistory']!='queue':self.respond(json.dumps({'error':'This entry keeps its watched state in Plex'}),'application/json',409);return
+                queue_marks[(set_id,value['ratingKey'])]=bool(value.get('isWatched'))
+                self.respond(json.dumps({'entryKey':value['entryKey'],'ratingKey':value['ratingKey'],'state':'watched' if value.get('isWatched') else 'unwatched'}),'application/json');return
             if path=='/api/native/sessions':
                 if self.headers.get('X-Plex-Profile-Token') not in ('fixture-user-ada','fixture-root'):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
+                start=value.get('start')
+                if start is not None:
+                    full=full_queue(value['setId'])
+                    if not full or full['kind']!='picks':self.respond(json.dumps({'error':'Only a Picks queue starts from a chosen item'}),'application/json',409);return
+                    entry=next((e for e in full['entries'] if e['entryKey']==start.get('entryKey')),None)
+                    picked=next((i for i in (entry or {}).get('items',[]) if i['ratingKey']==start.get('ratingKey')),None)
+                    if picked is None:self.respond(json.dumps({'error':'That item is not in this entry'}),'application/json',404);return
+                    native_starts.append({'setId':value['setId'],'start':start})
+                    chosen=[picked]+([i for i in entry['items'] if i['position']>picked['position'] and i['state']!='watched'] if start.get('mode')=='continue' else [])
+                    ident='native-fixture-'+str(len(native_sessions)+1)
+                    plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':'ada','profileName':'Ada','homeServerId':'fixture-server','sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':len(chosen),'handed':len(chosen),
+                        'items':[{'ratingKey':i['ratingKey'],'positionKey':f"{n}:home:{i['ratingKey']}",'resumeMs':0,'type':i['type'],'title':i['title'],'show':i['show'],'season':i['season'],'episode':i['episode']} for n,i in enumerate(chosen)]}
+                    native_sessions[ident]=plan;self.respond(json.dumps(plan),'application/json');return
                 ident='native-fixture-'+str(len(native_sessions)+1)
                 plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':'ada','profileName':'Ada','homeServerId':'fixture-server','sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':2,'handed':2,'items':[{'ratingKey':'102','positionKey':'0:home:102','resumeMs':4000,'type':'episode','title':'The signal','show':'Orbit Nine','season':1,'episode':9},{'ratingKey':'103','positionKey':'1:home:103','resumeMs':0,'type':'episode','title':'The return','show':'Harbor Lights','season':2,'episode':3}]}
                 plan['cursor']=native_resume.get(value['setId'],0)
@@ -112,6 +186,20 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed=urlparse(self.path); path=parsed.path
         if path=='/_native_events':self.respond(json.dumps(native_events),'application/json');return
+        if path=='/_native_starts':self.respond(json.dumps(native_starts),'application/json');return
+        if path=='/_history_requests':self.respond(json.dumps(history_requests),'application/json');return
+        if path=='/_queue_marks':self.respond(json.dumps([{'setId':k[0],'ratingKey':k[1],'isWatched':v} for k,v in queue_marks.items()]),'application/json');return
+        if path.startswith('/api/native/queues/') and path.endswith('/full'):
+            if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
+            if not is_native_profile(self):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
+            full=full_queue(path.split('/')[4])
+            if not full:self.respond(json.dumps({'error':'This queue plays as another profile'}),'application/json',403);return
+            self.respond(json.dumps(full),'application/json');return
+        if path=='/api/native/history':
+            if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
+            if not is_native_profile(self):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
+            days=max(1,min(365,int(parse_qs(parsed.query).get('days',['30'])[0])))
+            history_requests.append({'days':days});self.respond(json.dumps(history(days)),'application/json');return
         if path.startswith('/avatars/') or (path.startswith('/api/native/people/') and path.endswith('/avatar')):
             name=path.split('/')[-2] if path.endswith('/avatar') else path.split('/')[-1].removesuffix('.jpg')
             self.respond((ROOT/(name+'.jpg')).read_bytes(),'image/jpeg');return

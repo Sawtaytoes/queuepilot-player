@@ -7,7 +7,7 @@ panel at density 320; without it the emulator's own density is used.
 import smoke as s
 import re,sys,time
 
-ENTRIES=['Home','Watching','Series','Movies','Settings']
+ENTRIES=['Home','Watching','History','Series','Movies','Settings']
 COLLAPSED,EXPANDED=76,186
 assert s.adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
 is_shield='--density-320' in sys.argv
@@ -71,13 +71,13 @@ assert all(e in texts for e in ENTRIES),texts
 s.shot('rail-expanded-'+label)
 
 # The avatar stays reachable below the entries.
-key(20,5);focus_becomes('Switch profile, Ada')
+key(20,len(ENTRIES));focus_becomes('Switch profile, Ada')
 # Right returns to the content and collapses the rail; Back from the content returns to it.
 key(22);state('collapsed');assert not is_focus_in_rail()
 key(4);focus_becomes('Home');state('expanded')
 
 # Choose Settings from the rail by remote; the next visit to the rail returns to Settings.
-key(20,4);focus_becomes('Settings');key(23)
+key(20,len(ENTRIES)-1);focus_becomes('Settings');key(23)
 s.contains('Display size');state('collapsed')
 key(21,3);focus_becomes('Settings');state('expanded')
 key(22);state('collapsed')

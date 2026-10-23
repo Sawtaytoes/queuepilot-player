@@ -17,5 +17,6 @@ python3 -u "$source_directory/tools/display_smoke.py" --density-320
 python3 -u "$source_directory/tools/rail_smoke.py"
 python3 -u "$source_directory/tools/rail_smoke.py" --density-320
 python3 -u "$source_directory/tools/details_smoke.py"
+python3 -u "$source_directory/tools/queue_history_smoke.py"
 python3 -u "$source_directory/tools/layout_smoke.py"
 python3 -u "$source_directory/tools/layout_smoke.py" --density-320
