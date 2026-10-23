@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>QueuePilot Test</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="bar">
+    <img class="mark" src="/static/favicon.svg" alt="" width="28" height="28">
+    <h1>QueuePilot Test</h1>
+    <span id="state" class="pill">Connecting</span>
+    <span id="app" class="detail"></span>
+    <button id="stop" class="quiet" type="button" hidden>Stop</button>
+  </header>
+
+  <div id="banner" class="banner" role="status" hidden></div>
+
+  <main class="layout">
+    <section class="screen" aria-label="Android TV display">
+      <div id="display" class="display"></div>
+      <div id="overlay" class="overlay">
+        <p id="overlayTitle" class="overlay-title">Connecting</p>
+        <p id="overlayDetail" class="overlay-detail"></p>
+        <div id="progress" class="progress" hidden><span></span></div>
+        <button id="start" type="button" hidden>Start Android TV</button>
+      </div>
+    </section>
+
+    <aside class="remote" aria-label="Remote control">
+      <div class="dpad">
+        <button data-key="up" class="up" type="button" aria-label="Up">&#9650;</button>
+        <button data-key="left" class="left" type="button" aria-label="Left">&#9664;</button>
+        <button data-key="ok" class="ok" type="button">OK</button>
+        <button data-key="right" class="right" type="button" aria-label="Right">&#9654;</button>
+        <button data-key="down" class="down" type="button" aria-label="Down">&#9660;</button>
+      </div>
+      <div class="row">
+        <button data-key="back" type="button">Back</button>
+        <button data-key="home" type="button">Home</button>
+        <button data-key="menu" type="button">Menu</button>
+      </div>
+      <div class="row">
+        <button data-key="rewind" type="button" aria-label="Rewind">&#9194;</button>
+        <button data-key="playPause" type="button" aria-label="Play or pause">&#9199;</button>
+        <button data-key="fastForward" type="button" aria-label="Fast forward">&#9193;</button>
+      </div>
+      <form id="textForm" class="text">
+        <label for="text">Type into the focused field</label>
+        <div class="text-row">
+          <input id="text" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="200">
+          <button type="submit">Send</button>
+        </div>
+        <button data-key="delete" type="button" class="quiet">Delete one character</button>
+      </form>
+      <p class="keys">Keyboard: arrows, Enter, Esc or Backspace (Back), H (Home), Space (Play/Pause).</p>
+      <p id="idle" class="idle"></p>
+      <button id="keepRunning" class="quiet" type="button" hidden>Keep running</button>
+    </aside>
+  </main>
+  <div id="notice" class="notice" role="alert" hidden></div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>

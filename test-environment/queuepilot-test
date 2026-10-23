@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+"""Command-line access to the QueuePilot Test environment, run inside its container.
+
+  queuepilot-test status
+  queuepilot-test start
+  queuepilot-test stop
+  queuepilot-test install <apk> [--label TEXT]   # install a build into the shared session and keep it
+  queuepilot-test install --release              # return to the latest release
+  queuepilot-test run [--source DIR] [--apk APK] [--label TEXT] [--wait SECONDS] -- COMMAND...
+  queuepilot-test idle <minutes>                 # change the idle stop until the container restarts
+
+`run` is the only supported way for an automated test to use the emulator. It takes
+the shared lock, saves the owner's session, runs the command with the fixture server
+from the given checkout, and restores the session afterward, whatever the outcome.
+"""
+
+import argparse
+import asyncio
+import fcntl
+import http.client
+import json
+import os
+import shutil
+import signal
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import qptest  # noqa: E402
+
+
+class UnixConnection(http.client.HTTPConnection):
+    def __init__(self, path, timeout):
+        super().__init__('localhost', timeout=timeout)
+        self.path = path
+
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(str(self.path))
+
+
+def call(method, path, body=None, timeout=1800):
+    connection = UnixConnection(qptest.SOCKET_PATH, timeout)
+    payload = json.dumps(body or {}).encode()
+    connection.request(method, path, body=payload if method == 'POST' else None,
+                       headers={'Content-Type': 'application/json'})
+    response = connection.getresponse()
+    text = response.read().decode()
+    if response.status >= 400:
+        raise SystemExit(f'queuepilot-test: {path} failed ({response.status}): {text}')
+    return json.loads(text)
+
+
+def describe(status):
+    lines = [f"state: {status['state']} ({status['phase']})"]
+    if status.get('error'):
+        lines.append(f"error: {status['error']}")
+    app = status.get('app') or {}
+    if app.get('versionName'):
+        lines.append(f"app: {app['versionName']} from {app.get('source')} {app.get('version')}")
+    if status.get('test'):
+        lines.append(f"test: {status['test']['label']} ({status['test']['status']})")
+    if status.get('idleStopAt'):
+        lines.append(f"idle stop in {int(status['idleStopAt'] - status['serverTime'])} s")
+    return '\n'.join(lines)
+
+
+def adb(*arguments, check=True):
+    return subprocess.run(['adb', '-s', qptest.SERIAL, *arguments], env=qptest.ENVIRONMENT,
+                          check=check, capture_output=True, text=True)
+
+
+def require_emulator():
+    hardware = adb('shell', 'getprop', 'ro.hardware').stdout.strip()
+    if hardware not in ('ranchu', 'goldfish'):
+        raise SystemExit('queuepilot-test: refusing a target that is not the emulator')
+
+
+def command_install(arguments):
+    if arguments.release:
+        qptest.PIN_PATH.unlink(missing_ok=True)
+        print(describe(call('POST', '/app/ensure')))
+        return
+    apk = Path(arguments.apk).resolve()
+    if not apk.is_file():
+        raise SystemExit(f'queuepilot-test: no APK at {apk}')
+    status = call('GET', '/status')
+    if status.get('test'):
+        raise SystemExit('queuepilot-test: an automated test is active; try again when it finishes')
+    if status['state'] != 'running':
+        call('POST', '/start')
+    pinned = qptest.STATE / 'pinned.apk'
+    shutil.copyfile(apk, pinned)
+    qptest.write_json(qptest.PIN_PATH, {
+        'path': str(pinned), 'label': arguments.label or f'build from {apk}',
+        'sha256': qptest.file_sha256(pinned), 'installedAt': time.time()})
+    # Installing over the app keeps the session's data. A build signed with a
+    # different key is refused rather than uninstalling the signed-in app.
+    print(describe(call('POST', '/app/ensure')))
+
+
+def command_run(arguments):
+    command = arguments.command
+    if command and command[0] == '--':
+        command = command[1:]
+    if not command:
+        raise SystemExit('queuepilot-test run: give a command after --')
+    source = Path(arguments.source).resolve() if arguments.source else None
+    apk = Path(arguments.apk).resolve() if arguments.apk else None
+    if apk is None and source is not None:
+        candidate = source / 'android/app/build/outputs/apk/debug/app-debug.apk'
+        apk = candidate if candidate.is_file() else None
+    label = arguments.label or ' '.join(Path(part).name if '/' in part else part for part in command)[:120]
+
+    qptest.LOCK_PATH.touch(exist_ok=True)
+    lock = open(qptest.LOCK_PATH, 'a')
+    deadline = time.monotonic() + arguments.wait
+    while True:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() > deadline:
+                holder = qptest.read_json(qptest.SESSION_PATH, {})
+                raise SystemExit(f"queuepilot-test: another test holds the emulator: {holder.get('label', 'unknown')}")
+            time.sleep(5)
+
+    fixture = None
+    status = 1
+    try:
+        print(f'queuepilot-test: saving the shared session before "{label}"', flush=True)
+        call('POST', '/test/begin', {'label': label})
+        require_emulator()
+        if apk:
+            print(f'queuepilot-test: installing {apk}', flush=True)
+            asyncio.run(qptest.install_apk(apk, allow_uninstall=True))
+        if source is not None and (source / 'tools/fixture_server.py').is_file():
+            log = open(qptest.LOGS / 'fixture-server.log', 'ab')
+            fixture = subprocess.Popen(
+                ['python3', str(source / 'tools/fixture_server.py')], stdout=log, stderr=log,
+                env={**qptest.ENVIRONMENT, 'FIXTURE_ROOT': str(qptest.FIXTURES)}, start_new_session=True)
+            time.sleep(1)
+        environment = {**qptest.ENVIRONMENT, 'QUEUEPILOT_TEST_SOURCE': str(source or ''),
+                       'FIXTURE_ROOT': str(qptest.FIXTURES)}
+        child = subprocess.Popen(command, env=environment, cwd=str(source) if source else None)
+        signal.signal(signal.SIGTERM, lambda *_: child.terminate())
+        status = child.wait()
+    finally:
+        if fixture is not None:
+            os.killpg(fixture.pid, signal.SIGTERM)
+            fixture.wait()
+        print('queuepilot-test: restoring the shared session', flush=True)
+        try:
+            call('POST', '/test/end')
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
+            lock.close()
+    print(f'queuepilot-test: command exited with {status}', flush=True)
+    raise SystemExit(status)
+
+
+def main():
+    parser = argparse.ArgumentParser(prog='queuepilot-test', description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    commands = parser.add_subparsers(dest='operation', required=True)
+    commands.add_parser('status')
+    commands.add_parser('start')
+    stop = commands.add_parser('stop')
+    stop.add_argument('--reason', default='stopped by command')
+    install = commands.add_parser('install')
+    install.add_argument('apk', nargs='?')
+    install.add_argument('--release', action='store_true')
+    install.add_argument('--label')
+    run = commands.add_parser('run')
+    run.add_argument('--source')
+    run.add_argument('--apk')
+    run.add_argument('--label')
+    run.add_argument('--wait', type=int, default=1800, help='seconds to wait for another test')
+    run.add_argument('command', nargs=argparse.REMAINDER)
+    idle = commands.add_parser('idle')
+    idle.add_argument('minutes', type=float)
+    arguments = parser.parse_args()
+
+    if arguments.operation == 'status':
+        print(describe(call('GET', '/status')))
+    elif arguments.operation == 'start':
+        print(describe(call('POST', '/start')))
+    elif arguments.operation == 'stop':
+        print(describe(call('POST', '/stop', {'reason': arguments.reason})))
+    elif arguments.operation == 'install':
+        if not arguments.release and not arguments.apk:
+            raise SystemExit('queuepilot-test install: give an APK path or --release')
+        command_install(arguments)
+    elif arguments.operation == 'run':
+        command_run(arguments)
+    elif arguments.operation == 'idle':
+        print(describe(call('POST', '/idle', {'minutes': arguments.minutes})))
+
+
+if __name__ == '__main__':
+    main()
