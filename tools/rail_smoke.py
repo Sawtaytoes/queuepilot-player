@@ -7,7 +7,7 @@ panel at density 320; without it the emulator's own density is used.
 import smoke as s
 import re,sys,time
 
-ENTRIES=['Home','Watching','History','Series','Movies','Settings']
+ENTRIES=['Home','Watching','History','Series','Movies','Search','Settings']
 COLLAPSED,EXPANDED=76,186
 assert s.adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
 is_shield='--density-320' in sys.argv

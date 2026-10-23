@@ -54,7 +54,7 @@ blocks the browser remote. It then installs the checkout's debug APK, starts
 `tools/fixture_server.py` with `FIXTURE_ROOT`, and runs the checks: the emulator-only hierarchy
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
-`rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, and
+`rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `library_smoke.py`, and
 `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
@@ -136,6 +136,22 @@ queue's missing Start here and its reason, and the profile-switch notice. Then H
 `GET /api/native/history?days=30` grouped by queue and sitting, the "about" time of a play
 recorded before exact times, the sitting panel, and the 7-day period. `rail_smoke.py` counts
 History among the rail entries.
+
+`library_smoke.py` follows the queue and history check. The fixture's **Archive** library
+(section 3) holds 305 invented films across the alphabet, with no X and four titles under "#".
+The fixture honors `sort`, `X-Plex-Container-Start` and `-Size`, returns `totalSize`, and serves
+`/library/sections/<key>/firstCharacter`, `/hubs/search` (with `sectionId`), and
+`POST /api/native/queues/:setId/items`; every expected order is read from the fixture. The
+check covers: title order, the count line, and a letter bar matching the first-character index
+and fitting on screen; Down through more than one page with focus on the expected title in
+every row, a second page requested, and no paging buttons; a jump to M that keeps the title on
+screen while the page above arrives, and Up into it; Back from a title deep in the library
+returning focus to it; Add to queue listing only the two Picks queues that play as Ada, with the
+Rules and other-profile notes, an add and a duplicate, and the request body; each of the four
+other sorts against the fixture's order, without the letter bar, with Recently added kept across
+a restart; search from the rail grouped as Movies and Episodes, an episode added as its show,
+and Back to the same results; a search within the Archive sending `sectionId=3`; and the letter
+bar at 1080p density 320. `rail_smoke.py` now counts seven entries, Search among them.
 
 ## Lucide icons
 

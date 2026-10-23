@@ -86,7 +86,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private String fullQueueFocus = "";
   private int historyDays = 30;
 
-  private record Screen(String kind, String path, String title, PlexCatalog.Entry entry, int page) {
+  /**
+   * One screen in the Back history. {@code position} is the library item a paged grid is
+   * restored around, so Back from a title deep in a library returns to that title.
+   */
+  private record Screen(
+      String kind, String path, String title, PlexCatalog.Entry entry, int position) {
     Screen(String kind, String path, String title, PlexCatalog.Entry entry) {
       this(kind, path, title, entry, 0);
     }
@@ -253,6 +258,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       case "queues" -> queues();
       case "fullqueue" -> fullQueue(screen.path(), screen.title());
       case "history" -> history();
+      case "search" -> search(screen);
       default -> drawHome();
     }
   }
@@ -261,6 +267,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private static final int RAIL_COLLAPSED = 76, RAIL_EXPANDED = 186, RAIL_MILLIS = 120;
 
   private LinearLayout rail;
+  private FrameLayout shellRoot;
+  private ScrollView contentScroll;
   private View railSelected;
   private final List<View> railLabels = new ArrayList<>();
   private boolean isRailExpanded;
@@ -269,7 +277,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void shell(String selected) {
     FrameLayout root = new FrameLayout(this);
     root.setBackgroundColor(TvUi.BG);
+    shellRoot = root;
     ScrollView scroll = new ScrollView(this);
+    contentScroll = scroll;
     scroll.setFillViewport(true);
     scroll.setClipToPadding(false);
     content = ui.column();
@@ -288,7 +298,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     rail.setBackgroundColor(0xff14171f);
     rail.setTag("rail");
     rail.setContentDescription("Navigation, collapsed");
-    // Six entries and the avatar are taller than a 1080p screen at density 320 and the largest
+    // Seven entries and the avatar are taller than a 1080p screen at density 320 and the largest
     // Display size, so the rail scrolls to the focused entry when it does not fit.
     ScrollView railScroll = new ScrollView(this);
     railScroll.setFillViewport(true);
@@ -322,6 +332,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         () -> navigate(new Screen("history")));
     nav(rail, "Series", R.drawable.lucide_tv, selected, () -> browseType("show", "Series"));
     nav(rail, "Movies", R.drawable.lucide_film, selected, () -> browseType("movie", "Movies"));
+    nav(
+        rail,
+        "Search",
+        R.drawable.lucide_search,
+        selected,
+        () -> navigate(new Screen("search")));
     View settingsEntry =
         nav(
             rail,
@@ -456,6 +472,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return switch (current.kind()) {
       case "home", "queues", "history", "settings" -> true;
       case "library" -> "/library/sections".equals(current.path());
+      case "search" -> current.path().isEmpty();
       default -> false;
     };
   }
@@ -1555,36 +1572,141 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     navigate(new Screen("library", "/library/sections", title, null));
   }
 
+  /** Width kept clear along the right edge of a section grid for the jump-by-letter bar. */
+  private static final int LETTER_BAR = 44;
+
+  /**
+   * The library grid on show: one contiguous window [start, end) of a paged listing, starting
+   * on a row boundary. Pages load ahead of focus in both directions; a letter jump replaces
+   * the grid with a new window that starts at the letter.
+   */
+  private static final class Grid {
+    String path = "", sortParam = "", sectionKey = "";
+    LibraryBrowse.Sort sort;
+    int columns, pageSize, start, end, total = -1;
+    boolean isComplete, isLoadingLater, isLoadingEarlier, isCached;
+    LinearLayout rows;
+    final Map<Integer, View> cards = new HashMap<>();
+    List<LibraryBrowse.Letter> letters = List.of();
+    final Map<String, TextView> letterViews = new HashMap<>();
+    String shownLetter = "";
+  }
+
+  private Grid grid;
+
+  private String sortPreference(String section) {
+    return "library-sort:" + activeId + ":" + profile.optString("serverId") + ":" + section;
+  }
+
   private void load(String path, String title) {
     if (profile == null) {
       render(new Screen("welcome"));
       return;
     }
     shell(title.equals("Series") ? "Series" : title.equals("Movies") ? "Movies" : "");
+    String section = LibraryBrowse.sectionKey(path);
+    if (!section.isEmpty()) {
+      // The letter bar sits along the right edge, so the grid leaves it room.
+      mainWidth -= LETTER_BAR;
+      content.setPadding(
+          content.getPaddingLeft(),
+          content.getPaddingTop(),
+          dp(32 + LETTER_BAR),
+          content.getPaddingBottom());
+    }
     heading("Your library", title);
     status.setText("Loading your library…");
+    if (path.equals("/library/sections")) {
+      loadSections(path, title);
+      return;
+    }
     java.util.regex.Matcher parent =
         java.util.regex.Pattern.compile("/library/metadata/(\\d+)/children").matcher(path);
-    if (parent.matches() && current.page() == 0) {
+    if (parent.matches()) {
       // A show or season lists its children under its own summary, facts and cast.
       LinearLayout header = ui.column();
       content.addView(header);
       loadParentHeader(parent.group(1), header);
     }
-    int page = current.page();
-    boolean paged = !path.equals("/library/sections");
-    String requestPath =
-        paged
-            ? path
-                + (path.contains("?") ? "&" : "?")
-                + "X-Plex-Container-Start="
-                + (page * 30)
-                + "&X-Plex-Container-Size=30"
-            : path;
+    Grid g = new Grid();
+    g.path = path;
+    g.sectionKey = section;
+    g.columns = columns(5);
+    g.pageSize = LibraryBrowse.pageSize(g.columns);
+    if (!section.isEmpty()) {
+      g.sort = LibraryBrowse.sort(prefs().getString(sortPreference(section), ""));
+      g.sortParam = g.sort.param();
+      libraryTools(g, title);
+    }
+    g.rows = ui.column();
+    content.addView(g.rows);
+    g.start = g.end = LibraryBrowse.restoreStart(current.position(), g.columns);
+    grid = g;
+    loadLater(g, -1);
+    if (g.sort == LibraryBrowse.DEFAULT_SORT) loadLetters(g);
+  }
+
+  /** Sort and Search for a library section, above its grid. */
+  private void libraryTools(Grid g, String title) {
+    LinearLayout tools = ui.row();
+    TextView sort =
+        ui.button(
+            "Sort · " + g.sort.label(),
+            R.drawable.lucide_arrow_up_down,
+            () -> sortPanel(g, title),
+            false);
+    sort.setContentDescription("Sort, " + g.sort.label());
+    tools.addView(sort);
+    TextView find =
+        ui.button(
+            "Search",
+            R.drawable.lucide_search,
+            () -> navigate(new Screen("search", g.sectionKey, title, null)),
+            false);
+    find.setContentDescription("Search " + title);
+    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+    lp.leftMargin = dp(12);
+    tools.addView(find, lp);
+    content.addView(tools);
+    ui.gap(content, 22);
+  }
+
+  private static final int[] SORT_ICONS = {
+    R.drawable.lucide_arrow_down_a_z,
+    R.drawable.lucide_calendar_plus,
+    R.drawable.lucide_calendar,
+    R.drawable.lucide_star,
+    R.drawable.lucide_history,
+  };
+
+  /** The section's sorts in a side panel; the choice is kept for this section and profile. */
+  private void sortPanel(Grid g, String title) {
+    String[] labels = new String[LibraryBrowse.SORTS.size()];
+    for (int i = 0; i < labels.length; i++) labels[i] = LibraryBrowse.SORTS.get(i).label();
+    TvPanel dialog =
+        panel()
+            .setTitle("Sort " + title)
+            .setSelected(LibraryBrowse.indexOf(g.sort))
+            .setItemIcons(SORT_ICONS)
+            .setItems(
+                labels,
+                (d, i) -> {
+                  LibraryBrowse.Sort chosen = LibraryBrowse.SORTS.get(i);
+                  prefs().edit().putString(sortPreference(g.sectionKey), chosen.id()).apply();
+                  // The same screen in a new order, starting at its first title.
+                  render(new Screen("library", g.path, title, null, 0));
+                })
+            .create();
+    dialog.show();
+    dialog.setPanelSize(dp(360), -2);
+  }
+
+  /** The library list behind Series or Movies: a few libraries, never paged. */
+  private void loadSections(String path, String title) {
     fetch(
-        requestPath,
+        path,
         (entries, cached) -> {
-          if (path.equals("/library/sections") && Set.of("Series", "Movies").contains(title)) {
+          if (Set.of("Series", "Movies").contains(title)) {
             JSONArray matching = new JSONArray();
             String type = title.equals("Series") ? "show" : "movie";
             for (int i = 0; i < entries.length(); i++)
@@ -1595,49 +1717,25 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           status.setText(
               cached
                   ? "Saved listing · your server is currently unavailable"
-                  : entries.length() + (entries.length() == 1 ? " title" : " titles"));
+                  : entries.length() + (entries.length() == 1 ? " library" : " libraries"));
           if (entries.length() == 0) {
-            status.setText(
-                page == 0
-                    ? "No titles found in this library."
-                    : "You have reached the end of this library.");
-            if (page > 0)
-              content.addView(
-                  ui.button(
-                      "Previous page",
-                      () -> render(new Screen("library", path, title, null, page - 1)),
-                      false));
+            status.setText("No libraries found on this server.");
             return;
           }
           LinearLayout row = null;
           View first = null;
           int columns = columns(5);
-          for (int i = 0; i < Math.min(30, entries.length()); i++) {
+          for (int i = 0; i < entries.length(); i++) {
             if (i % columns == 0) {
               row = ui.row();
               row.setTag(i == 0 ? "poster-row-first" : null);
               content.addView(row);
               ui.gap(content, 22);
             }
-            PlexCatalog.Entry entry = PlexCatalog.Entry.fromJson(entries.optJSONObject(i));
-            View card = poster(entry);
+            View card = poster(PlexCatalog.Entry.fromJson(entries.optJSONObject(i)), -1);
             row.addView(card);
             if (first == null) first = card;
           }
-          LinearLayout pages = ui.row();
-          content.addView(pages);
-          if (page > 0)
-            ui.action(
-                pages,
-                "Previous page",
-                () -> render(new Screen("library", path, title, null, page - 1)),
-                false);
-          if (paged && entries.length() >= 30)
-            ui.action(
-                pages,
-                "Next page",
-                () -> render(new Screen("library", path, title, null, page + 1)),
-                false);
           if (first != null) focusFirst(first);
         },
         () -> {
@@ -1646,7 +1744,286 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         });
   }
 
-  private View poster(PlexCatalog.Entry entry) {
+  /** One page of a paged listing, with the listing's total; the last copy when offline. */
+  private interface Page {
+    void ready(JSONArray entries, int total, boolean cached);
+  }
+
+  private void fetchPage(String path, Page callback, Runnable failure) {
+    int request = generation;
+    String origin = server(), secret = token(), id = activeId;
+    network.execute(
+        () -> {
+          JSONObject page;
+          boolean cached = false;
+          try {
+            byte[] xml = PlexCatalog.get(PlexCatalog.url(origin, path), secret, 16 * 1024 * 1024);
+            page =
+                new JSONObject()
+                    .put("entries", PlexCatalog.list(xml))
+                    .put("total", PlexCatalog.totalSize(xml));
+            java.nio.file.Files.write(
+                cacheFile(id, origin, path).toPath(),
+                page.toString().getBytes(StandardCharsets.UTF_8));
+          } catch (Exception e) {
+            try {
+              page =
+                  new JSONObject(
+                      new String(
+                          java.nio.file.Files.readAllBytes(cacheFile(id, origin, path).toPath()),
+                          StandardCharsets.UTF_8));
+              cached = true;
+            } catch (Exception missing) {
+              runOnUiThread(
+                  () -> {
+                    if (request == generation) failure.run();
+                  });
+              return;
+            }
+          }
+          JSONObject result = page;
+          boolean fromCache = cached;
+          runOnUiThread(
+              () -> {
+                if (request == generation && id.equals(activeId))
+                  callback.ready(
+                      result.optJSONArray("entries") == null
+                          ? new JSONArray()
+                          : result.optJSONArray("entries"),
+                      result.optInt("total", -1),
+                      fromCache);
+              });
+        });
+  }
+
+  private void gridStatus(Grid g) {
+    if (g.isCached) status.setText("Saved listing · your server is currently unavailable");
+    else if (g.sort != null && g.total >= 0) status.setText(LibraryBrowse.countLine(g.total, g.sort));
+    else {
+      int count = g.total >= 0 ? g.total : g.end;
+      status.setText(count + (count == 1 ? " title" : " titles"));
+    }
+  }
+
+  /**
+   * Loads the page after the window. {@code focusIndex} is the item to focus when this is the
+   * window's first page (a letter jump), or -1 for the remembered or first item.
+   */
+  private void loadLater(Grid g, int focusIndex) {
+    if (g.isLoadingLater || g.isComplete) return;
+    g.isLoadingLater = true;
+    int from = g.end;
+    boolean isFirst = g.start == g.end;
+    fetchPage(
+        LibraryBrowse.pagePath(g.path, g.sortParam, from, g.pageSize),
+        (entries, total, cached) -> {
+          if (g != grid) return;
+          g.isLoadingLater = false;
+          if (total >= 0) g.total = total;
+          g.isCached |= cached;
+          int count = entries.length();
+          if (count == 0 && isFirst && from > 0) {
+            // The remembered place is past the end now; start again at the first title.
+            g.start = g.end = 0;
+            loadLater(g, -1);
+            return;
+          }
+          appendRows(g, entries, from, false);
+          g.end = from + count;
+          g.isComplete = count < g.pageSize || (g.total >= 0 && g.end >= g.total);
+          gridStatus(g);
+          if (!isFirst) return;
+          if (count == 0) {
+            if (!cached) status.setText("No titles found in this library.");
+            return;
+          }
+          View target = focusIndex >= 0 ? g.cards.get(focusIndex) : null;
+          // A jump is chosen on the bar, so its title takes focus even after a touch.
+          if (target != null) target.requestFocusFromTouch();
+          else focusFirst(g.cards.get(from));
+        },
+        () -> {
+          if (g != grid) return;
+          g.isLoadingLater = false;
+          if (!isFirst) return;
+          status.setText("Your server is unavailable and this listing isn't saved yet.");
+          content.addView(ui.button("Try again", () -> render(current), true));
+        });
+  }
+
+  /** Loads the page before the window and keeps the focused poster where it was on screen. */
+  private void loadEarlier(Grid g) {
+    if (g.isLoadingEarlier || g.start <= 0) return;
+    g.isLoadingEarlier = true;
+    int from = LibraryBrowse.earlierStart(g.start, g.pageSize), size = g.start - from;
+    fetchPage(
+        LibraryBrowse.pagePath(g.path, g.sortParam, from, size),
+        (entries, total, cached) -> {
+          if (g != grid) return;
+          g.isLoadingEarlier = false;
+          if (entries.length() != size) return; // the listing changed; keep the window as is
+          View anchor = g.rows.getChildCount() > 0 ? g.rows.getChildAt(0) : null;
+          int before = anchor == null ? 0 : anchor.getTop();
+          appendRows(g, entries, from, true);
+          g.start = from;
+          if (anchor != null)
+            anchor
+                .getViewTreeObserver()
+                .addOnPreDrawListener(
+                    new android.view.ViewTreeObserver.OnPreDrawListener() {
+                      @Override
+                      public boolean onPreDraw() {
+                        anchor.getViewTreeObserver().removeOnPreDrawListener(this);
+                        contentScroll.scrollBy(0, anchor.getTop() - before);
+                        return true;
+                      }
+                    });
+        },
+        () -> {
+          if (g == grid) g.isLoadingEarlier = false;
+        });
+  }
+
+  /** Adds whole rows of posters, after the window or, for {@code isBefore}, above it. */
+  private void appendRows(Grid g, JSONArray entries, int from, boolean isBefore) {
+    int at = 0;
+    LinearLayout row = null;
+    for (int i = 0; i < entries.length(); i++) {
+      if (i % g.columns == 0) {
+        row = ui.row();
+        if (from + i == 0) row.setTag("poster-row-first");
+        View gap = new View(this);
+        if (isBefore) {
+          g.rows.addView(row, at++);
+          g.rows.addView(gap, at++, new LinearLayout.LayoutParams(1, dp(22)));
+        } else {
+          g.rows.addView(row);
+          g.rows.addView(gap, new LinearLayout.LayoutParams(1, dp(22)));
+        }
+      }
+      int index = from + i;
+      View card = poster(PlexCatalog.Entry.fromJson(entries.optJSONObject(i)), index);
+      View.OnFocusChangeListener outline = card.getOnFocusChangeListener();
+      card.setOnFocusChangeListener(
+          (v, focused) -> {
+            outline.onFocusChange(v, focused);
+            if (focused) gridFocused(g, index);
+          });
+      g.cards.put(index, card);
+      row.addView(card);
+    }
+  }
+
+  private void gridFocused(Grid g, int index) {
+    if (g != grid) return;
+    if (LibraryBrowse.needsLater(index, g.end, g.columns, g.isComplete)) loadLater(g, -1);
+    if (LibraryBrowse.needsEarlier(index, g.start, g.columns)) loadEarlier(g);
+    LibraryBrowse.Letter letter = LibraryBrowse.letterAt(g.letters, index);
+    showLetter(g, letter == null ? "" : letter.key());
+  }
+
+  /** The jump-by-letter bar, from the section's first-character index, under title order. */
+  private void loadLetters(Grid g) {
+    int request = generation;
+    String origin = server(), secret = token(), path = "/library/sections/" + g.sectionKey;
+    network.execute(
+        () -> {
+          try {
+            List<LibraryBrowse.Letter> letters =
+                PlexCatalog.letters(
+                    PlexCatalog.get(
+                        PlexCatalog.url(origin, path + "/firstCharacter"),
+                        secret,
+                        1024 * 1024));
+            runOnUiThread(
+                () -> {
+                  if (request == generation && g == grid && !letters.isEmpty())
+                    drawLetterBar(g, letters);
+                });
+          } catch (Exception ignored) {
+            // The grid still scrolls without the bar.
+          }
+        });
+  }
+
+  private void drawLetterBar(Grid g, List<LibraryBrowse.Letter> letters) {
+    g.letters = letters;
+    LinearLayout bar = ui.column();
+    bar.setGravity(Gravity.CENTER_HORIZONTAL);
+    bar.setTag("letter-bar");
+    int height = getResources().getDisplayMetrics().heightPixels;
+    // Every letter fits on the screen at any Display size: the cells shrink to fit.
+    int cell = Math.max(dp(12), Math.min(dp(30), (height - dp(32)) / letters.size()));
+    for (LibraryBrowse.Letter letter : letters) {
+      TextView view = new TextView(this);
+      view.setText(letter.title());
+      view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, cell * .56f);
+      view.setTypeface(
+          android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+      view.setTextColor(TvUi.MUTED);
+      view.setGravity(Gravity.CENTER);
+      view.setIncludeFontPadding(false);
+      // The bar outlives a jump, so it always acts on the grid on show.
+      ui.focusable(view, () -> jumpTo(letter), Color.TRANSPARENT, 6);
+      view.setContentDescription("Jump to " + letter.title());
+      g.letterViews.put(letter.key(), view);
+      bar.addView(view, new LinearLayout.LayoutParams(dp(LETTER_BAR - 8), cell));
+    }
+    FrameLayout.LayoutParams lp =
+        new FrameLayout.LayoutParams(dp(LETTER_BAR - 4), -2, Gravity.END | Gravity.CENTER_VERTICAL);
+    lp.rightMargin = dp(4);
+    shellRoot.addView(bar, lp);
+    View focused = getWindow().getDecorView().findFocus();
+    for (Map.Entry<Integer, View> card : g.cards.entrySet())
+      if (card.getValue() == focused) gridFocused(g, card.getKey());
+  }
+
+  /** Marks the letter of the focused title in the bar. */
+  private void showLetter(Grid g, String key) {
+    if (key.equals(g.shownLetter)) return;
+    TextView old = g.letterViews.get(g.shownLetter), now = g.letterViews.get(key);
+    if (old != null) old.setTextColor(TvUi.MUTED);
+    if (now != null) now.setTextColor(TvUi.ACCENT);
+    g.shownLetter = key;
+  }
+
+  /** Starts the grid at the first title of {@code letter} and focuses it. */
+  private void jumpTo(LibraryBrowse.Letter letter) {
+    Grid g = grid;
+    if (g == null) return;
+    int offset = LibraryBrowse.offsetOf(g.letters, letter.key());
+    if (offset < 0) return;
+    View cached = g.cards.get(offset);
+    if (cached != null) {
+      cached.requestFocusFromTouch();
+      return;
+    }
+    Grid jumped = new Grid();
+    jumped.path = g.path;
+    jumped.sectionKey = g.sectionKey;
+    jumped.sort = g.sort;
+    jumped.sortParam = g.sortParam;
+    jumped.columns = g.columns;
+    jumped.pageSize = g.pageSize;
+    jumped.total = g.total;
+    jumped.letters = g.letters;
+    jumped.letterViews.putAll(g.letterViews);
+    jumped.start = jumped.end = LibraryBrowse.rowStart(offset, g.columns);
+    jumped.rows = ui.column();
+    int at = content.indexOfChild(g.rows);
+    content.removeView(g.rows);
+    content.addView(jumped.rows, at);
+    showLetter(g, "");
+    grid = jumped;
+    status.setText("Jumping to " + letter.title() + "…");
+    loadLater(jumped, offset);
+  }
+
+  /**
+   * A poster card. {@code index} is its place in a paged grid, or -1; opening a grid poster
+   * remembers it, so Back restores the grid around it.
+   */
+  private View poster(PlexCatalog.Entry entry, int index) {
     LinearLayout card = ui.column();
     card.setPadding(dp(3), dp(3), dp(3), dp(10));
     int width = itemWidth(columns(5));
@@ -1676,6 +2053,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.focusable(
         card,
         () -> {
+          if (index >= 0 && current != null)
+            current = new Screen(current.kind(), current.path(), current.title(), null, index);
           if (Set.of("movie", "episode").contains(entry.type()))
             navigate(new Screen("details", "", "", entry));
           else navigate(new Screen("library", entry.children(), entry.title(), null));
@@ -1796,6 +2175,23 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout actions = ui.row();
     TextView play = ui.button("Play", R.drawable.lucide_play, () -> playEntry(entry), true);
     actions.addView(play);
+    // An episode is added as its show: a queue holds movies and shows.
+    boolean isEpisode = entry.type().equals("episode");
+    String addKey = isEpisode ? entry.showKey() : entry.key();
+    if (!addKey.isEmpty()) {
+      String addTitle = isEpisode ? entry.showTitle() : entry.title();
+      TextView add =
+          ui.button(
+              "Add to queue",
+              R.drawable.lucide_list_plus,
+              () -> addToQueue(addKey, addTitle, isEpisode),
+              false);
+      add.setContentDescription(
+          isEpisode ? "Add the show " + addTitle + " to a queue" : "Add to queue");
+      LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2);
+      gap.leftMargin = dp(12);
+      actions.addView(add, gap);
+    }
     if (more != null) {
       LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2);
       gap.leftMargin = dp(12);
@@ -1805,7 +2201,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     art.leftMargin = dp(12);
     actions.addView(
         ui.button("Artwork quality", R.drawable.lucide_image, () -> compareArt(entry), false), art);
-    info.addView(actions);
+    // The actions scroll sideways rather than squeeze a label at a large Display size.
+    HorizontalScrollView actionScroll = new HorizontalScrollView(this);
+    actionScroll.setHorizontalScrollBarEnabled(false);
+    actionScroll.setClipToPadding(false);
+    actionScroll.addView(actions);
+    info.addView(actionScroll);
     content.addView(row);
     LinearLayout castArea = ui.column();
     content.addView(castArea);
@@ -1948,6 +2349,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     summary.setEllipsize(TextUtils.TruncateAt.END);
                     ui.gap(header, 6);
                     header.addView(summary);
+                  }
+                  if (parent.type().equals("show")) {
+                    ui.gap(header, 14);
+                    LinearLayout row = ui.row();
+                    TextView add =
+                        ui.button(
+                            "Add to queue",
+                            R.drawable.lucide_list_plus,
+                            () -> addToQueue(parent.key(), parent.title(), false),
+                            false);
+                    row.addView(add);
+                    header.addView(row);
                   }
                   LinearLayout cast = ui.column();
                   header.addView(cast);
@@ -3211,12 +3624,14 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return card;
   }
 
-  private void panelButton(LinearLayout body, String label, int icon, boolean primary, Runnable action) {
+  private TextView panelButton(
+      LinearLayout body, String label, int icon, boolean primary, Runnable action) {
     TextView button = ui.button(label, icon, action, primary);
     button.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
     lp.bottomMargin = dp(8);
     body.addView(button, lp);
+    return button;
   }
 
   private void panelNote(LinearLayout body, String text) {
@@ -4462,6 +4877,345 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         return;
       }
     }
+  }
+
+  // Add to queue: a side panel listing the Picks queues that play as this profile.
+
+  /**
+   * Lists the queues a title can be added to and adds it to the chosen one. {@code isShow}
+   * says the title is the show of the episode on screen, which is named in the panel.
+   */
+  private void addToQueue(String ratingKey, String title, boolean isShow) {
+    String origin = prefs().getString("queue-origin", "");
+    if (origin.isEmpty()) {
+      message(
+          "Add to queue",
+          "Connect your QueuePilot server in Settings to add titles to your queues.");
+      return;
+    }
+    LinearLayout body = ui.column();
+    TvPanel[] holder = new TvPanel[1];
+    holder[0] =
+        panel()
+            .setTitle("Add to a queue")
+            .setMessage(isShow ? title + " · the whole show" : title)
+            .setView(body)
+            .create();
+    panelNote(body, "Finding your queues…");
+    holder[0].show();
+    holder[0].setPanelSize(dp(460), -2);
+    fetchQueues(
+        origin,
+        Set.of(),
+        all -> {
+          if (!holder[0].isShowing()) return;
+          JSONArray people = all.optJSONArray("people");
+          if (people != null) queuePeople = people;
+          JSONArray listed = all.optJSONArray("queues");
+          List<JSONObject> queues = new ArrayList<>();
+          for (int i = 0; listed != null && i < listed.length(); i++)
+            if (listed.optJSONObject(i) != null) queues.add(listed.optJSONObject(i));
+          QueueList.AddTargets<JSONObject> targets =
+              QueueList.addTargets(
+                  queues, q -> q.optString("kind"), q -> q.optString("requiredProfile"), profileName());
+          body.removeAllViews();
+          View first = null;
+          for (JSONObject queue : targets.addable()) {
+            String name = queue.optString("title", "Movies & Shows"), audience = queueAudience(queue);
+            TextView choice =
+                panelButton(
+                    body,
+                    name + " · " + audience,
+                    R.drawable.lucide_list_plus,
+                    false,
+                    () -> {
+                      holder[0].dismiss();
+                      postAddToQueue(queue, ratingKey, title);
+                    });
+            // Titles repeat, so the spoken name carries the audience as the queue cards do.
+            choice.setContentDescription("Add to " + name + ". " + audience);
+            if (first == null) first = choice;
+          }
+          if (targets.addable().isEmpty())
+            panelNote(body, "No Picks queue plays as " + profileName() + ".");
+          if (targets.rules() > 0)
+            panelNote(
+                body, "Rules queues choose their own titles, so they can't take a title you add.");
+          if (targets.otherProfile() > 0)
+            panelNote(
+                body,
+                targets.otherProfile() == 1
+                    ? "1 Picks queue plays as another profile. Switch profile to add to it."
+                    : targets.otherProfile()
+                        + " Picks queues play as another profile. Switch profile to add to them.");
+          if (all.optBoolean("cached"))
+            panelNote(body, "Saved queues · QueuePilot is unavailable, so adding may fail.");
+          TextView close =
+              panelButton(body, "Close", R.drawable.lucide_x, false, () -> holder[0].dismiss());
+          holder[0].setPanelSize(dp(460), -2);
+          (first == null ? close : first).requestFocus();
+        },
+        error -> {
+          if (!holder[0].isShowing()) return;
+          body.removeAllViews();
+          panelNote(body, "QueuePilot couldn't load your queues. " + error.getMessage());
+          panelButton(body, "Close", R.drawable.lucide_x, false, () -> holder[0].dismiss()).requestFocus();
+          holder[0].setPanelSize(dp(460), -2);
+        });
+  }
+
+  private void postAddToQueue(JSONObject queue, String ratingKey, String title) {
+    String origin = prefs().getString("queue-origin", ""), setId = queue.optString("id");
+    String name = queue.optString("title", "Movies & Shows");
+    String serverId = profile == null ? "" : profile.optString("serverId");
+    if (status != null) status.setText("Adding to " + name + "…");
+    int request = generation;
+    network.execute(
+        () -> {
+          try {
+            JSONObject body = new JSONObject().put("ratingKey", ratingKey);
+            if (!serverId.isEmpty()) body.put("plexServer", serverId);
+            JSONObject result =
+                NativeQueueApi.request(
+                    origin,
+                    "/api/native/queues/" + PlexAccount.encode(setId) + "/items",
+                    body,
+                    "X-Plex-Profile-Token",
+                    profileProof());
+            boolean isAdded = result.optBoolean("added");
+            runOnUiThread(
+                () -> {
+                  if (request != generation) return;
+                  status.setText(isAdded ? "Added to " + name : "Already in " + name);
+                  message(
+                      isAdded ? "Added to queue" : "Already in this queue",
+                      isAdded
+                          ? title + " is now at the top of " + name + "."
+                          : title + " is already in " + name + ".");
+                });
+          } catch (Exception error) {
+            runOnUiThread(
+                () -> {
+                  if (request != generation) return;
+                  status.setText("The title wasn't added.");
+                  message("Add to queue", error.getMessage());
+                });
+          }
+        });
+  }
+
+  // Search: Plex's /hubs/search, grouped into Movies, Shows, and Episodes.
+
+  /** The last query per search screen ("" for the whole library, or a section key). */
+  private final Map<String, String> searchQueries = new HashMap<>();
+
+  private int searchSequence;
+  private EditText searchField;
+  private Runnable pendingSearch;
+
+  private final androidx.activity.result.ActivityResultLauncher<android.content.Intent> voice =
+      registerForActivityResult(
+          new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+          result -> {
+            if (result.getData() == null || searchField == null || !searchField.isAttachedToWindow())
+              return;
+            ArrayList<String> heard =
+                result
+                    .getData()
+                    .getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS);
+            if (heard != null && !heard.isEmpty()) searchField.setText(heard.get(0));
+          });
+
+  private boolean isVoiceAvailable() {
+    return !getPackageManager()
+        .queryIntentActivities(
+            new android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0)
+        .isEmpty();
+  }
+
+  private void search(Screen screen) {
+    String section = screen.path(), sectionTitle = screen.title();
+    shell("Search");
+    heading(section.isEmpty() ? "Your library" : sectionTitle, "Search");
+    if (profile == null) {
+      status.setText("Sign in to search your library.");
+      return;
+    }
+    status.setText(
+        section.isEmpty() ? "Movies, shows, and episodes" : "Titles in " + sectionTitle);
+    LinearLayout bar = ui.row();
+    bar.setGravity(Gravity.CENTER_VERTICAL);
+    EditText field = new EditText(this);
+    searchField = field;
+    field.setSingleLine(true);
+    field.setInputType(InputType.TYPE_CLASS_TEXT);
+    // The keyboard stays below the field, so the results above it stay in view.
+    field.setImeOptions(
+        android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            | android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
+            | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
+    field.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18 * TvUi.TYPE_BASE * ui.scale);
+    field.setTextColor(TvUi.WHITE);
+    field.setHintTextColor(TvUi.MUTED);
+    field.setHint("Search titles");
+    field.setContentDescription("Search titles");
+    field.setPadding(dp(16), dp(12), dp(16), dp(12));
+    ui.withIcon(field, R.drawable.lucide_search);
+    field.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(TvUi.MUTED));
+    field.setBackground(ui.shape(TvUi.PANEL, 0, 8));
+    field.setOnFocusChangeListener(
+        (v, focused) -> v.setBackground(ui.shape(TvUi.PANEL, focused ? TvUi.ACCENT : 0, 8)));
+    bar.addView(field, new LinearLayout.LayoutParams(dp(560), -2));
+    if (isVoiceAvailable()) {
+      TextView mic =
+          ui.button(
+              "Voice",
+              R.drawable.lucide_mic,
+              () -> {
+                try {
+                  voice.launch(
+                      new android.content.Intent(
+                              android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
+                          .putExtra(
+                              android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                              android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                          .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say a title"));
+                } catch (Exception unavailable) {
+                  message("Search by voice", "Voice search isn't available on this device.");
+                }
+              },
+              false);
+      mic.setContentDescription("Search by voice");
+      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+      lp.leftMargin = dp(12);
+      bar.addView(mic, lp);
+    }
+    content.addView(bar);
+    ui.gap(content, 10);
+    LinearLayout results = ui.column();
+    content.addView(results);
+    // Back from a result draws the same results again and focuses the result that was opened.
+    boolean[] isRestoring = {
+      focusMemory.containsKey(current) && !searchQueries.getOrDefault(section, "").isEmpty()
+    };
+    android.text.TextWatcher watcher =
+        new android.text.TextWatcher() {
+          @Override
+          public void beforeTextChanged(CharSequence t, int a, int b, int c) {}
+
+          @Override
+          public void onTextChanged(CharSequence t, int a, int b, int c) {}
+
+          @Override
+          public void afterTextChanged(android.text.Editable text) {
+            if (pendingSearch != null) handler.removeCallbacks(pendingSearch);
+            String query = text.toString();
+            pendingSearch = () -> runSearch(section, query, results, isRestoring);
+            handler.postDelayed(pendingSearch, 450);
+          }
+        };
+    field.setOnEditorActionListener(
+        (v, action, event) -> {
+          boolean isSearch =
+              action == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                  || (event != null
+                      && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
+                      && event.getAction() == KeyEvent.ACTION_DOWN);
+          if (!isSearch) return false;
+          if (pendingSearch != null) handler.removeCallbacks(pendingSearch);
+          runSearch(section, field.getText().toString(), results, isRestoring);
+          ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
+              .hideSoftInputFromWindow(field.getWindowToken(), 0);
+          return true;
+        });
+    String saved = searchQueries.getOrDefault(section, "");
+    if (!saved.isEmpty()) {
+      field.setText(saved);
+      field.setSelection(saved.length());
+      runSearch(section, saved, results, isRestoring);
+    }
+    field.addTextChangedListener(watcher);
+    if (!isRestoring[0]) focusFirst(field);
+  }
+
+  private static final String[][] SEARCH_GROUPS = {
+    {"movie", "Movies"}, {"show", "Shows"}, {"episode", "Episodes"},
+  };
+
+  private void runSearch(String section, String query, LinearLayout results, boolean[] isRestoring) {
+    String trimmed = query.trim();
+    searchQueries.put(section, trimmed);
+    int sequence = ++searchSequence, request = generation;
+    if (trimmed.isEmpty()) {
+      results.removeAllViews();
+      status.setText(section.isEmpty() ? "Movies, shows, and episodes" : "Titles in this library");
+      return;
+    }
+    status.setText("Searching for “" + trimmed + "”…");
+    String origin = server(), secret = token();
+    String path =
+        "/hubs/search?query="
+            + PlexAccount.encode(trimmed)
+            + "&limit=30"
+            + (section.isEmpty() ? "" : "&sectionId=" + PlexAccount.encode(section));
+    network.execute(
+        () -> {
+          try {
+            JSONArray found =
+                PlexCatalog.hubs(
+                    PlexCatalog.get(PlexCatalog.url(origin, path), secret, 16 * 1024 * 1024));
+            runOnUiThread(
+                () -> {
+                  if (request != generation || sequence != searchSequence) return;
+                  View first = drawSearchResults(found, results);
+                  int count = 0;
+                  for (int i = 0; i < found.length(); i++)
+                    for (String[] group : SEARCH_GROUPS)
+                      if (group[0].equals(found.optJSONObject(i).optString("hub"))) count++;
+                  status.setText(
+                      count == 0
+                          ? "No titles match “" + trimmed + "”."
+                          : count + (count == 1 ? " result" : " results") + " for “" + trimmed + "”");
+                  if (isRestoring[0] && first != null) focusFirst(first);
+                  isRestoring[0] = false;
+                });
+          } catch (Exception e) {
+            runOnUiThread(
+                () -> {
+                  if (request != generation || sequence != searchSequence) return;
+                  results.removeAllViews();
+                  status.setText("Search is unavailable while your server can't be reached.");
+                  isRestoring[0] = false;
+                });
+          }
+        });
+  }
+
+  /** Movies, then Shows, then Episodes, each a row of posters. Returns the first poster. */
+  private View drawSearchResults(JSONArray found, LinearLayout results) {
+    results.removeAllViews();
+    View first = null;
+    for (String[] group : SEARCH_GROUPS) {
+      List<PlexCatalog.Entry> entries = new ArrayList<>();
+      for (int i = 0; i < found.length(); i++) {
+        JSONObject item = found.optJSONObject(i);
+        if (item != null && group[0].equals(item.optString("hub")))
+          entries.add(PlexCatalog.Entry.fromJson(item));
+      }
+      if (entries.isEmpty()) continue;
+      ui.gap(results, 18);
+      TextView heading = ui.title(group[1], 21);
+      heading.setTag("search-group");
+      results.addView(heading);
+      ui.gap(results, 12);
+      LinearLayout row = horizontalIn(results);
+      for (PlexCatalog.Entry entry : entries) {
+        View card = poster(entry, -1);
+        row.addView(card);
+        if (first == null) first = card;
+      }
+    }
+    return first;
   }
 
   private void message(String title, String text) {

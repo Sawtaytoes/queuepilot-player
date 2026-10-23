@@ -59,10 +59,44 @@ def points(element, is_closed):
     return 'M' + 'L'.join(pairs) + ('z' if is_closed else '')
 
 
+ARC_FLAGS = re.compile(r'([aA])([^a-zA-Z]*)')
+NUMBER = re.compile(r'-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?')
+
+
+def arcs(d):
+    """Spell out SVG's compact arc flags ("a2 2 0 00-2-2"), which VectorDrawable rejects.
+
+    An arc takes seven values per segment, and its two flags are single digits that SVG lets
+    run together with what follows. Android's parser reads "00" as one number.
+    """
+    def expand(match):
+        values, text = [], match.group(2)
+        if len(NUMBER.findall(text)) % 7 == 0:
+            return match.group(0)  # already readable; keep the source text as it is
+        at = 0
+        while at < len(text):
+            if text[at] in ' ,':
+                at += 1
+                continue
+            slot = len(values) % 7
+            if slot in (3, 4):
+                values.append(text[at])
+                at += 1
+                continue
+            found = NUMBER.match(text, at)
+            if not found:
+                raise ValueError('Unreadable arc data: ' + text)
+            values.append(found.group(0))
+            at = found.end()
+        return match.group(1) + ' '.join(values)
+
+    return ARC_FLAGS.sub(expand, d)
+
+
 def path_data(element):
     tag = element.tag.removeprefix(SVG)
     if tag == 'path':
-        return element.get('d')
+        return arcs(element.get('d'))
     if tag == 'circle':
         r = attr(element, 'r')
         return circle(attr(element, 'cx'), attr(element, 'cy'), r, r)

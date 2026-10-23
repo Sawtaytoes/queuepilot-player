@@ -1,13 +1,17 @@
 # Lucide icons vendored into the app. One name per line; generate.py writes
 # res/drawable/lucide_<name>.xml for each. Version and integrity: fetch.sh.
+arrow-down-a-z
 arrow-left
 arrow-left-right
+arrow-up-down
 audio-lines
 calendar
+calendar-plus
 captions
 captions-off
 check
 chevron-left
+chevron-right
 chevrons-right
 circle-check
 circle-play
@@ -25,19 +29,23 @@ info
 library-big
 list-filter
 list-ordered
+list-plus
 list-start
 list-video
 maximize
+mic
 minimize
 pause
 play
 rotate-ccw
 rotate-cw
 scaling
+search
 settings
 skip-back
 skip-forward
 sparkles
+star
 text
 tv
 undo-2

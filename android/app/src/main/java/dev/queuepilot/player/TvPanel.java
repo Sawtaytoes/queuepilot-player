@@ -66,6 +66,8 @@ final class TvPanel extends Dialog {
         row.setPadding(ui.dp(14), ui.dp(12), ui.dp(14), ui.dp(12));
         row.setMinimumHeight(ui.dp(46));
         TextView label = ui.text(b.items[i], 16, TvUi.WHITE);
+        if (b.icons != null && i < b.icons.length && b.icons[i] != 0)
+          ui.withIcon(label, b.icons[i]);
         row.addView(label, new LinearLayout.LayoutParams(0, -2, 1));
         if (i == b.selected) {
           TextView check = ui.text("✓", 19, TvUi.ACCENT);
@@ -200,6 +202,7 @@ final class TvPanel extends Dialog {
     private View view, anchor;
     private String[] items;
     private int selected = -1;
+    private int[] icons;
     private DialogInterface.OnClickListener itemClick;
     private Runnable opened, closed;
     private java.util.function.Consumer<TvPanel> created, dismissed;
@@ -242,6 +245,12 @@ final class TvPanel extends Dialog {
         java.util.function.Consumer<TvPanel> onDismiss) {
       created = onCreate;
       dismissed = onDismiss;
+      return this;
+    }
+
+    /** A Lucide icon before each item's label, in the label's color; 0 for none. */
+    Builder setItemIcons(int[] values) {
+      icons = values;
       return this;
     }
 

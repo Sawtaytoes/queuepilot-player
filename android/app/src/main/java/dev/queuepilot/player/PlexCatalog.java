@@ -188,20 +188,77 @@ final class PlexCatalog {
   }
 
   static JSONArray list(byte[] xml) throws Exception {
+    return list(xml, 2);
+  }
+
+  /**
+   * Search results: the items of each {@code <Hub>}, each carrying its hub's type in
+   * {@code hub} ("movie", "show", "episode", …).
+   */
+  static JSONArray hubs(byte[] xml) throws Exception {
+    return list(xml, 3);
+  }
+
+  private static XmlPullParser parser(byte[] xml) throws Exception {
     XmlPullParser parser = Xml.newPullParser();
     parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
     parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false);
     parser.setInput(new ByteArrayInputStream(xml), "UTF-8");
+    return parser;
+  }
+
+  /** The listing's {@code totalSize} (sent for a paged request), else -1. */
+  static int totalSize(byte[] xml) throws Exception {
+    XmlPullParser parser = parser(xml);
+    for (int event = parser.getEventType();
+        event != XmlPullParser.END_DOCUMENT;
+        event = parser.next())
+      if (event == XmlPullParser.START_TAG) {
+        try {
+          return Integer.parseInt(attribute(parser, "totalSize"));
+        } catch (NumberFormatException e) {
+          return -1;
+        }
+      }
+    return -1;
+  }
+
+  /** A section's first-character index ({@code /library/sections/<key>/firstCharacter}). */
+  static java.util.List<LibraryBrowse.Letter> letters(byte[] xml) throws Exception {
+    XmlPullParser parser = parser(xml);
+    java.util.List<LibraryBrowse.Letter> letters = new java.util.ArrayList<>();
+    for (int event = parser.getEventType();
+        event != XmlPullParser.END_DOCUMENT;
+        event = parser.next())
+      if (event == XmlPullParser.START_TAG
+          && parser.getName().equals("Directory")
+          && parser.getDepth() == 2) {
+        int size;
+        try {
+          size = Integer.parseInt(attribute(parser, "size"));
+        } catch (NumberFormatException e) {
+          size = 0;
+        }
+        String key = attribute(parser, "key"), title = attribute(parser, "title");
+        if (!key.isEmpty()) letters.add(new LibraryBrowse.Letter(key, title.isEmpty() ? key : title, size));
+      }
+    return letters;
+  }
+
+  private static JSONArray list(byte[] xml, int depth) throws Exception {
+    XmlPullParser parser = parser(xml);
     JSONArray result = new JSONArray();
     JSONObject current = null;
     int itemDepth = -1;
+    String hub = "";
     StringBuilder cast = new StringBuilder();
     for (int event = parser.getEventType();
         event != XmlPullParser.END_DOCUMENT;
         event = parser.next()) {
       if (event == XmlPullParser.START_TAG) {
         String name = parser.getName();
-        if ((name.equals("Directory") || name.equals("Video")) && parser.getDepth() == 2) {
+        if (name.equals("Hub") && parser.getDepth() == depth - 1) hub = attribute(parser, "type");
+        if ((name.equals("Directory") || name.equals("Video")) && parser.getDepth() == depth) {
           String key = attribute(parser, "ratingKey");
           String directoryKey = attribute(parser, "key");
           String type = attribute(parser, "type");
@@ -240,7 +297,8 @@ final class PlexCatalog {
                   .put("seasonTitle", attribute(parser, "parentTitle"))
                   .put("showThumb", attribute(parser, "grandparentThumb"))
                   .put("summary", attribute(parser, "summary"))
-                  .put("facts", facts(parser));
+                  .put("facts", facts(parser))
+                  .put("hub", hub);
           itemDepth = parser.getDepth();
           cast.setLength(0);
         } else if (current != null && name.equals("Marker"))

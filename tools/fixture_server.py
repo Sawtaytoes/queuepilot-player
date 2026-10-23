@@ -44,6 +44,74 @@ def bif():
 def films():
     from xml.sax.saxutils import quoteattr
     return '<MediaContainer>'+''.join(f'<Video ratingKey="{key}" type="movie" title={quoteattr(title)} summary={quoteattr(summary)} year="2024" thumb="/art/poster.jpg"/>' for key,title,summary in FILMS)+'</MediaContainer>'
+# The Archive library (section 3): a few hundred invented films across the alphabet, with
+# added, release, rating and last-watched values in orders unlike the title order, so every
+# sort, every page and every letter jump has a different answer. No letter X; four titles
+# start with a digit and file under "#".
+ARCHIVE_WORDS={'A':'Amber','B':'Bright','C':'Copper','D':'Distant','E':'Emerald','F':'Frozen','G':'Golden','H':'Hollow','I':'Iron','J':'Jade','K':'Kindred','L':'Lunar','M':'Midnight','N':'Northern','O':'Open','P':'Painted','Q':'Quiet','R':'Rusted','S':'Silver','T':'Tidal','U':'Upper','V':'Velvet','W':'Winter','Y':'Yellow','Z':'Zero'}
+ARCHIVE_NOUNS=['Harbor','Signal','Garden','Station','River','Lantern','Orchard','Canyon','Meadow','Bridge','Comet','Island','Forest','Tower','Valley','Engine','Atlas','Beacon']
+def _archive():
+    titles=['3 Rivers','7 Bridges','9 Lanterns','12 Comets']
+    for letter,word in ARCHIVE_WORDS.items():
+        titles+=[f'{word} {noun}' for noun in ARCHIVE_NOUNS[:(ord(letter)*7)%13+6]]
+    films=[]
+    for i,title in enumerate(titles):
+        films.append({'key':str(5000+i),'title':title,'addedAt':1700000000+((i*37)%len(titles))*3600,
+            'originallyAvailableAt':f'{1980+(i*11)%45}-{(i%12)+1:02d}-{(i%27)+1:02d}','audienceRating':f'{((i*13)%90)/10+1:.1f}',
+            'lastViewedAt':1750000000+i*600 if i%5==0 else None})
+    return films
+ARCHIVE=_archive()
+def title_sort(title):return title[4:] if title.startswith('The ') else title
+def first_character(title):
+    c=title_sort(title)[:1].upper()
+    return c if c.isalpha() else '#'
+SORTS={'titleSort':lambda f:(title_sort(f['title']).casefold(),False),'addedAt:desc':lambda f:(f['addedAt'],True),
+    'originallyAvailableAt:desc':lambda f:(f['originallyAvailableAt'],True),'audienceRating:desc':lambda f:(float(f['audienceRating']),True),
+    'lastViewedAt:desc':lambda f:(f['lastViewedAt'] or 0,True)}
+def sorted_items(items,sort):
+    if not sort:return items
+    key=SORTS[sort];reverse=key(items[0])[1] if items else False
+    return sorted(items,key=lambda f:key(f)[0],reverse=reverse)
+def film_xml(f):
+    from xml.sax.saxutils import quoteattr
+    extra=''.join(f' {k}="{f[k]}"' for k in ('addedAt','originallyAvailableAt','audienceRating','lastViewedAt') if f.get(k))
+    return f'<Video ratingKey="{f["key"]}" type="movie" title={quoteattr(f["title"])} summary={quoteattr(f.get("summary","An invented film for the browsing fixture."))} year="2024" thumb="/art/poster.jpg"{extra}/>'
+SECTION_SHOWS=[{'key':'100','title':'Orbit Nine'},{'key':'200','title':'Harbor Lights'}]
+def show_xml(f):return f'<Directory ratingKey="{f["key"]}" key="/library/metadata/{f["key"]}/children" type="show" title="{f["title"]}" thumb="/art/poster.jpg"/>'
+def section_items(section):
+    if section=='1':return SECTION_SHOWS,show_xml
+    if section=='2':return [{'key':str(k),'title':t,'summary':d} for k,t,d in FILMS],film_xml
+    return ARCHIVE,film_xml
+def section_page(section,query):
+    """A section listing honoring sort, X-Plex-Container-Start and -Size, with totalSize."""
+    items,xml=section_items(section);ordered=sorted_items(items,query.get('sort',[''])[0])
+    start=int(query.get('X-Plex-Container-Start',['0'])[0]);size=int(query.get('X-Plex-Container-Size',[str(len(ordered))])[0])
+    page=ordered[start:start+size]
+    return f'<MediaContainer size="{len(page)}" totalSize="{len(ordered)}" offset="{start}">'+''.join(xml(f) for f in page)+'</MediaContainer>'
+def first_characters(section):
+    items,_=section_items(section);counts={}
+    for f in items:counts[first_character(f['title'])]=counts.get(first_character(f['title']),0)+1
+    keys=sorted(counts,key=lambda c:(c!='#',c))
+    return '<MediaContainer>'+''.join(f'<Directory key="{c}" title="{c}" size="{counts[c]}"/>' for c in keys)+'</MediaContainer>'
+EPISODES=[('102','The signal','100',SHOW_FIELDS['102'],'9'),('103','The return','200',SHOW_FIELDS['103'],'3')]
+def search_hubs(query,section):
+    """Plex's /hubs/search: the matching titles grouped into Movie, Show and Episode hubs."""
+    q=query.casefold();sections=[section] if section else ['1','2','3']
+    movies=[f for s in sections if s in ('2','3') for f in section_items(s)[0] if q in f['title'].casefold()]
+    shows=[f for f in SECTION_SHOWS if '1' in sections and q in f['title'].casefold()]
+    episodes=[e for e in EPISODES if '1' in sections and q in e[1].casefold()]
+    hubs=''
+    if movies:hubs+=f'<Hub type="movie" hubIdentifier="movie" title="Movies" size="{len(movies)}">'+''.join(film_xml(f) for f in movies[:30])+'</Hub>'
+    if shows:hubs+=f'<Hub type="show" hubIdentifier="show" title="Shows" size="{len(shows)}">'+''.join(show_xml(f) for f in shows)+'</Hub>'
+    if episodes:hubs+=f'<Hub type="episode" hubIdentifier="episode" title="Episodes" size="{len(episodes)}">'+''.join(f'<Video ratingKey="{k}" grandparentRatingKey="{show}" type="episode" index="{index}" title="{t}" thumb="/art/poster.jpg" {fields}/>' for k,t,show,fields,index in episodes)+'</Hub>'
+    return '<MediaContainer>'+hubs+'</MediaContainer>'
+# Titles a queue may hold, for the native add-to-queue route: movies and shows only.
+def addable_title(key):
+    if key in ('100','200'):return 'show'
+    if key in [str(k) for k,_,_ in FILMS] or any(f['key']==key for f in ARCHIVE):return 'movie'
+    if key in ('102','103'):return 'episode'
+    return None
+queue_adds=[]
 # Intro, mid-credits and final credits for the 30-second clip, in Plex's millisecond offsets.
 MARKERS='<Marker type="intro" startTimeOffset="6000" endTimeOffset="14000"/><Marker type="credits" startTimeOffset="18000" endTimeOffset="21000"/><Marker type="credits" final="1" startTimeOffset="25000" endTimeOffset="30000"/>'
 # Reserved example domain: the guest has no route to it, so only the server transcoder can serve it.
@@ -116,7 +184,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
         if path=='/_markers': markers=True;self.respond('ok');return
         if path=='/_online': video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
-        if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();self.respond('ok');return
+        if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();queue_adds.clear();self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
         if path=='/_cloud_offline': cloud_offline=True;self.respond('ok');return
         if path=='/_expire_next': expire_next=True;self.respond('ok');return
@@ -127,6 +195,17 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/native/'):
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
             value=json.loads(body or '{}')
+            if path.startswith('/api/native/queues/') and path.endswith('/items'):
+                if not is_native_profile(self):self.respond(json.dumps({'error':'This queue plays as another profile. Switch Plex profile first.'}),'application/json',403);return
+                set_id=path.split('/')[4]
+                if set_id=='movies-ada':self.respond(json.dumps({'error':'A Rules queue chooses its own titles. Add this to a Picks queue.'}),'application/json',409);return
+                if set_id not in ('ada-watch','friends-watch'):self.respond(json.dumps({'error':'This queue plays as another profile. Switch Plex profile first.'}),'application/json',403);return
+                key=str(value.get('ratingKey','')).strip();kind=addable_title(key)
+                if kind is None:self.respond(json.dumps({'error':'That title is not available to this profile'}),'application/json',404);return
+                if kind=='episode':self.respond(json.dumps({'error':'Only a movie or a show can be added to a queue'}),'application/json',400);return
+                duplicate=any(a['setId']==set_id and a['ratingKey']==key for a in queue_adds)
+                queue_adds.append({'setId':set_id,'ratingKey':key,'plexServer':value.get('plexServer'),'added':not duplicate})
+                self.respond(json.dumps({'added':not duplicate,'key':'rk:'+key,**({'duplicateOf':'rk:'+key} if duplicate else {}),'title':key}),'application/json');return
             if path.startswith('/api/native/queues/') and path.endswith('/watched'):
                 if not is_native_profile(self):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
                 set_id=path.split('/')[4];full=full_queue(set_id)
@@ -188,6 +267,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/_native_events':self.respond(json.dumps(native_events),'application/json');return
         if path=='/_native_starts':self.respond(json.dumps(native_starts),'application/json');return
         if path=='/_history_requests':self.respond(json.dumps(history_requests),'application/json');return
+        if path=='/_queue_adds':self.respond(json.dumps(queue_adds),'application/json');return
         if path=='/_queue_marks':self.respond(json.dumps([{'setId':k[0],'ratingKey':k[1],'isWatched':v} for k,v in queue_marks.items()]),'application/json');return
         if path.startswith('/api/native/queues/') and path.endswith('/full'):
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
@@ -234,19 +314,24 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/library/onDeck':
             self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg" {SHOW_FIELDS["102"]}/><Video ratingKey="103" type="episode" index="3" title="The return" thumb="/art/poster.jpg" {SHOW_FIELDS["103"]}/></MediaContainer>');return
         if path=='/library/sections':
-            self.respond('<MediaContainer><Directory key="1" type="show" title="Series"/><Directory key="2" type="movie" title="Films"/></MediaContainer>');return
-        if path=='/library/sections/2/all':
+            self.respond('<MediaContainer><Directory key="1" type="show" title="Series"/><Directory key="2" type="movie" title="Films"/><Directory key="3" type="movie" title="Archive"/></MediaContainer>');return
+        query=parse_qs(parsed.query)
+        if path=='/library/sections/2/all' and not query:
             self.respond(films());return
-        if path=='/library/sections/1/all':
-            self.respond('<MediaContainer><Directory ratingKey="100" key="/library/metadata/100/children" type="show" title="Orbit Nine" thumb="/art/poster.jpg"/><Directory ratingKey="200" key="/library/metadata/200/children" type="show" title="Harbor Lights" thumb="/art/poster.jpg"/></MediaContainer>');return
+        if path in ('/library/sections/1/all','/library/sections/2/all','/library/sections/3/all'):
+            self.respond(section_page(path.split('/')[3],query));return
+        if path in ('/library/sections/1/firstCharacter','/library/sections/2/firstCharacter','/library/sections/3/firstCharacter'):
+            self.respond(first_characters(path.split('/')[3]));return
+        if path=='/hubs/search':
+            self.respond(search_hubs(query.get('query',[''])[0],query.get('sectionId',[''])[0]));return
         if path=='/library/metadata/100/children':
             self.respond('<MediaContainer><Directory ratingKey="101" type="season" title="Season 1" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/101/children':
-            self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg" {SHOW_FIELDS["102"]}/></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" grandparentRatingKey="100" type="episode" index="9" title="The signal" thumb="/art/poster.jpg" {SHOW_FIELDS["102"]}/></MediaContainer>');return
         if path=='/library/metadata/200/children':
             self.respond('<MediaContainer><Directory ratingKey="201" type="season" title="Season 2" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/201/children':
-            self.respond(f'<MediaContainer><Video ratingKey="103" type="episode" index="3" title="The return" thumb="/art/poster.jpg" {SHOW_FIELDS["103"]}/></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="103" grandparentRatingKey="200" type="episode" index="3" title="The return" thumb="/art/poster.jpg" {SHOW_FIELDS["103"]}/></MediaContainer>');return
         if path in ('/library/metadata/100','/library/metadata/200'):
             # Like many anime libraries, the show holds the cast and its episodes carry no Role.
             # One portrait is a server path; the other is an external HTTPS portrait host.

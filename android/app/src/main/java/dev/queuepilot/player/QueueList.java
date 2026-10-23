@@ -36,6 +36,28 @@ final class QueueList {
     return new Groups<>(own, other);
   }
 
+  /**
+   * Where a title can be added: the Picks queues that play as the active profile. A Rules queue
+   * chooses its own titles, and a queue that plays as another profile refuses this profile, so
+   * both are only counted, for the panel to explain.
+   */
+  record AddTargets<T>(List<T> addable, int rules, int otherProfile) {}
+
+  static <T> AddTargets<T> addTargets(
+      List<T> queues,
+      Function<T, String> kind,
+      Function<T, String> requiredProfile,
+      String activeProfile) {
+    List<T> addable = new ArrayList<>();
+    int rules = 0, other = 0;
+    for (T queue : queues) {
+      if ("rules".equals(kind.apply(queue))) rules++;
+      else if (!playsAs(requiredProfile.apply(queue), activeProfile)) other++;
+      else addable.add(queue);
+    }
+    return new AddTargets<>(addable, rules, other);
+  }
+
   /** Shown only while a people filter is active, so a filter never hides queues silently. */
   static String filterSummary(int shown, int total) {
     return "Showing " + shown + " of " + total + (total == 1 ? " queue" : " queues");

@@ -48,4 +48,20 @@ public class QueueListTest {
     assertEquals("Showing 2 of 24 queues", QueueList.filterSummary(2, 24));
     assertEquals("Showing 1 of 1 queue", QueueList.filterSummary(1, 1));
   }
+
+  @Test
+  public void aTitleIsAddedOnlyToPicksQueuesThatPlayAsTheProfile() {
+    record Listed(String id, String kind, String requiredProfile) {}
+    var queues =
+        List.of(
+            new Listed("ada-watch", "picks", "Ada"),
+            new Listed("movies-grace", "picks", "Grace"),
+            new Listed("anyone", "picks", ""),
+            new Listed("movies-ada", "rules", "Ada"));
+    var targets = QueueList.addTargets(queues, Listed::kind, Listed::requiredProfile, "ada");
+    assertEquals(
+        List.of("ada-watch", "anyone"), targets.addable().stream().map(Listed::id).toList());
+    assertEquals(1, targets.rules());
+    assertEquals(1, targets.otherProfile());
+  }
 }

@@ -51,6 +51,23 @@ percent, and applies at once. Grids gain columns at smaller sizes. The Media3 co
 are scaled about their anchored edge. The title screen keeps a long title to two lines and a
 summary to four, with **More** for the full text.
 
+**Library browsing.** A library opens as one grid that keeps loading as focus moves down, with
+no page buttons: the next page arrives before focus reaches the last loaded row, and focus
+stays where it is while it arrives. **Sort** opens a side panel: Title, Recently added, Release
+date, Rating, or Last watched. The choice is kept for that library and profile. In title order a
+**# A–Z** bar runs down the right edge; a letter starts the grid at its first title and loads
+the titles before it as focus moves up. Back from a title returns to that title, however deep
+in the library it was. **Search** (on the rail, and in each library's header for that library
+alone) takes the on-screen keyboard, and voice when the device has a speech recognizer, and
+groups the results as Movies, Shows, and Episodes; a result opens its title screen.
+
+**Add to queue** on a title screen, and on a show's season list, lists the Picks queues that
+play as the active profile, each with its audience ("Ada, Grace"). The title goes to the top of
+the chosen queue, and a title already in it is reported, not repeated. An episode is added as
+its show. A Rules queue chooses its own titles and cannot take one, and a queue that plays as
+another profile refuses this one; the panel says both instead of offering them. This needs
+QueuePilot's `POST /api/native/queues/:setId/items`.
+
 A title screen shows what Plex sends about the title: year, content rating, length or season
 and episode counts, studio, genres, critic and audience scores, time left or episodes
 watched, director and writers, and a cast row with portraits. A show's season list and a
@@ -123,7 +140,7 @@ This preview does not negotiate transcoding, import real story
 ordering manifests, or download media. External ASS and ASS in other containers remain
 outside the custom renderer. HDR conversion, Dolby Vision, and passthrough still need
 explicit device evidence.
-Library grids request pages of 30 items. Demo Episode 9 → OVA → Episode 10 ordering and
+Library grids request pages of about 48 items, always whole rows. Demo Episode 9 → OVA → Episode 10 ordering and
 progress remain separate from real Plex items. Use this for testing rather than the family
 player's default viewing sessions.
 
@@ -150,7 +167,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.4.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.5.5.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
 without involving a household TV; `tools/tv-lab.sh test` runs them there.
 
