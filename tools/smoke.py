@@ -32,6 +32,19 @@ def click(label):
                 adb('shell','input','tap',str((x1+x2)//2),str((y1+y2)//2));time.sleep(.5);return
         adb('shell','input','swipe',str(int(width*.91)),str(int(height*.84)),str(int(width*.91)),str(int(height*.33)),'300');time.sleep(.3)
     raise AssertionError('Missing control: '+label+'\n'+text())
+def open_library(name):
+    """Tap a library card by name; the rail's entry of the same name is not a library card."""
+    print('Open library:',name,flush=True)
+    for _ in range(20):
+        root=screen()
+        rail=next((n for n in root.iter('node') if n.get('content-desc','').startswith('Navigation')),None)
+        in_rail={id(n) for n in rail.iter('node')} if rail is not None else set()
+        node=next((n for n in root.iter('node') if n.get('content-desc')==name and id(n) not in in_rail),None)
+        if node is not None:
+            x1,y1,x2,y2=map(int,re.findall(r'\d+',node.get('bounds')))
+            adb('shell','input','tap',str((x1+x2)//2),str((y1+y2)//2));time.sleep(.5);return
+        time.sleep(.5)
+    raise AssertionError('Missing library: '+name+'\n'+text())
 def cast_photos(*names):
     """A cast card's portrait is described only after its image has been decoded and shown."""
     for _ in range(20):
@@ -39,6 +52,36 @@ def cast_photos(*names):
         if all('Photo of '+name in described for name in names):return
         time.sleep(.5)
     raise AssertionError('Missing cast photos: '+', '.join(n for n in names if 'Photo of '+n not in described))
+def pixels(png):
+    """Decode an 8-bit RGB or RGBA screencap PNG into (width, height, rows of bytes)."""
+    import struct,zlib
+    assert png[:8]==b'\x89PNG\r\n\x1a\n';at=8;data=b''
+    while at<len(png):
+        size,kind=struct.unpack('>I4s',png[at:at+8]);body=png[at+8:at+8+size];at+=12+size
+        if kind==b'IHDR':width,height,depth,color=struct.unpack('>IIBB',body[:10])
+        elif kind==b'IDAT':data+=body
+    assert depth==8 and color in (2,6),(depth,color)
+    step=4 if color==6 else 3;stride=width*step;raw=zlib.decompress(data);rows=[];previous=bytearray(stride)
+    for y in range(height):
+        kind=raw[y*(stride+1)];line=bytearray(raw[y*(stride+1)+1:(y+1)*(stride+1)])
+        for x in range(stride):
+            a=line[x-step] if x>=step else 0;b=previous[x];c=previous[x-step] if x>=step else 0
+            if kind==1:line[x]=(line[x]+a)&255
+            elif kind==2:line[x]=(line[x]+b)&255
+            elif kind==3:line[x]=(line[x]+(a+b)//2)&255
+            elif kind==4:
+                p=a+b-c;pa,pb,pc=abs(p-a),abs(p-b),abs(p-c)
+                line[x]=(line[x]+(a if pa<=pb and pa<=pc else b if pb<=pc else c))&255
+        rows.append(bytes(line));previous=line
+    return width,height,step,rows
+def ink(image,box):
+    """The share of pixels inside box that differ clearly from the box's most common color."""
+    from collections import Counter
+    width,height,step,rows=image;x1,y1,x2,y2=box
+    colors=[rows[y][x*step:x*step+3] for y in range(max(0,y1),min(height,y2)) for x in range(max(0,x1),min(width,x2))]
+    if not colors:return 0
+    ground=Counter(colors).most_common(1)[0][0]
+    return sum(1 for c in colors if sum(abs(c[i]-ground[i]) for i in range(3))>90)/len(colors)
 def shot(name):Path('/fixtures/'+name+'.png').write_bytes(adb('exec-out','screencap','-p'))
 def post(path):urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:9010/'+path,method='POST'),timeout=5).read()
 def launch():adb('shell','am','start','-n',PACKAGE+'/dev.queuepilot.player.MainActivity','--ez','fixture','true');time.sleep(1)
@@ -66,12 +109,12 @@ def main():
     assert not 'fixture-root' in adb('shell','run-as',PACKAGE,'cat','shared_prefs/state.xml').decode()
     post('_expire_next');click('Connect Plex');contains('This code has expired');click('New code');contains('ABCD');post('_claim');contains("Who's watching?");shot('profile-picker')
     click('Morgan');enter_pin('1111');contains("Plex couldn't unlock that profile");click('Choose profile');click('Ada');contains('What are we watching?');contains('Demo Cinema');shot('signed-in-home')
-    click('Series');contains('Series');click('Series');contains('Orbit Nine');shot('library')
+    click('Series');open_library('Series');contains('Orbit Nine');shot('library')
     click('Orbit Nine');contains('Season 1');click('Season 1');contains('S1 · E9 · The signal');click('Orbit Nine, S1 · E9 · The signal');contains('Watch with Ada');contains('Orbit Nine');shot('title')
     click('Play');time.sleep(3);adb('shell','input','keyevent','127');adb('shell','input','keyevent','19');contains('Decoded video: 1280 × 720');click('Cast');contains('Nadia Lane');contains('Omar Reed');cast_photos('Nadia Lane','Omar Reed');shot('cast');click('Close');back();contains('Watch with Ada')
     back();contains('The signal');back();contains('Season 1');back();contains('Orbit Nine')
-    click('Home');click('Switch profile, Ada');click('Grace');contains('What are we watching?');contains('Demo Cinema');click('Series');click('Series');contains('Orbit Nine')
-    post('_cloud_offline');post('_offline');click('Home');click('Switch profile, Grace');click('Ada');contains('What are we watching?');click('Series');contains('Saved listing');click('Series');contains('Saved listing');contains('Orbit Nine');shot('cached-library')
+    click('Home');click('Switch profile, Ada');click('Grace');contains('What are we watching?');contains('Demo Cinema');click('Series');open_library('Series');contains('Orbit Nine')
+    post('_cloud_offline');post('_offline');click('Home');click('Switch profile, Grace');click('Ada');contains('What are we watching?');click('Series');contains('Saved listing');open_library('Series');contains('Saved listing');contains('Orbit Nine');shot('cached-library')
     post('_online');click('Home');click('Switch profile, Ada');click('Morgan');enter_pin('2468');contains('What are we watching?');contains('Demo Cinema')
     encrypted=adb('shell','run-as',PACKAGE,'cat','shared_prefs/secrets.xml').decode()
     assert 'ciphertext' in encrypted and not any(s in encrypted for s in ('fixture-root','fixture-ada','fixture-grace','fixture-morgan'))

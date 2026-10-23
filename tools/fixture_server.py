@@ -19,15 +19,32 @@ SHOW_FIELDS={'102':'grandparentTitle="Orbit Nine" parentIndex="1" parentTitle="S
 native_offline=False
 video_fixture='sample.mp4'
 markers=False
-# Intro, mid-credits and final credits for the 30-second clip, in Plex's millisecond offsets.
 # Invented films. One has a long title and summary, so the details screen must clamp both;
 # twelve fill several rows, so a smaller Display size visibly gains columns.
 LONG_TITLE='The Extraordinarily Long Voyage of the Lantern Keeper and the Seven Lighthouses Beyond the Northern Sea, Told in Twelve Winters by the Last Keeper of the Northern Light and Her Crew of Two, and of the Ice That Came After'
 LONG_SUMMARY=' '.join(['A retired lantern keeper sails north to relight seven lighthouses that went dark in the same winter.']*9+['The final lighthouse waits beyond the ice.'])
 FILMS=[(301,LONG_TITLE,LONG_SUMMARY),(302,'Glass City','A courier crosses a city built from glass.')]+[(300+i,t,'An invented film for the browsing fixture.') for i,t in enumerate(['Paper Moons','The Quiet Orchard','Signal Fire','North of Tomorrow','Salt and Copper','Small Hours','Kite Season','The Lantern Road','Low Tide','Blue Hour'],3)]
+# Full metadata for one film, as /library/metadata/<key> returns it: the facts, genres and
+# credits the title screen shows, and a resume point partway through.
+GLASS_CITY=('<MediaContainer><Video ratingKey="302" type="movie" title="Glass City" year="2024" contentRating="PG" studio="Lantern Pictures" rating="8.1" audienceRating="7.6" duration="6720000" viewOffset="4440000" summary="A courier crosses a city built from glass." thumb="/art/poster.jpg">'
+    '<Media videoResolution="1080" audioChannels="6"><Part id="1302" key="/video/sample.mp4"/></Media>'
+    '<Genre tag="Drama"/><Genre tag="Mystery"/><Director tag="Ines Cole"/><Writer tag="Theo Marsh"/>'
+    '<Role tag="Mara Quill" role="The courier" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="The glazier" thumb="/art/omar.jpg"/></Video></MediaContainer>')
+# Seek thumbnails for the 30-second clip: a Roku BIF with a frame every five seconds. Each
+# frame is a different fixture JPEG, so the preview shows which frame was chosen.
+def bif():
+    import struct
+    names=['low','nadia','omar','ada','grace','low','nadia']
+    frames=[(ROOT/(n+'.jpg')).read_bytes() for n in names]
+    header=bytes([0x89,0x42,0x49,0x46,0x0d,0x0a,0x1a,0x0a])+struct.pack('<III',0,len(frames),5000)+bytes(44)
+    offset=64+(len(frames)+1)*8;index=b''
+    for i,frame in enumerate(frames):index+=struct.pack('<II',i,offset);offset+=len(frame)
+    index+=struct.pack('<II',0xffffffff,offset)
+    return header+index+b''.join(frames)
 def films():
     from xml.sax.saxutils import quoteattr
     return '<MediaContainer>'+''.join(f'<Video ratingKey="{key}" type="movie" title={quoteattr(title)} summary={quoteattr(summary)} year="2024" thumb="/art/poster.jpg"/>' for key,title,summary in FILMS)+'</MediaContainer>'
+# Intro, mid-credits and final credits for the 30-second clip, in Plex's millisecond offsets.
 MARKERS='<Marker type="intro" startTimeOffset="6000" endTimeOffset="14000"/><Marker type="credits" startTimeOffset="18000" endTimeOffset="21000"/><Marker type="credits" final="1" startTimeOffset="25000" endTimeOffset="30000"/>'
 # Reserved example domain: the guest has no route to it, so only the server transcoder can serve it.
 EXTERNAL_PORTRAIT='https://images.example.com/portraits/omar.jpg'
@@ -145,13 +162,17 @@ class Handler(BaseHTTPRequestHandler):
         if path in ('/library/metadata/100','/library/metadata/200'):
             # Like many anime libraries, the show holds the cast and its episodes carry no Role.
             # One portrait is a server path; the other is an external HTTPS portrait host.
-            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" type="show" title="{"Orbit Nine" if path.endswith("100") else "Harbor Lights"}" thumb="/art/poster.jpg"><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="{EXTERNAL_PORTRAIT}"/></Directory></MediaContainer>');return
+            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" type="show" title="{"Orbit Nine" if path.endswith("100") else "Harbor Lights"}" year="2021" contentRating="TV-PG" studio="Northlight Studio" childCount="1" leafCount="12" viewedLeafCount="3" summary="A relay crew keeps a distant station talking to home." thumb="/art/poster.jpg"><Genre tag="Science Fiction"/><Genre tag="Drama"/><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="{EXTERNAL_PORTRAIT}"/></Directory></MediaContainer>');return
         if path in ('/library/metadata/101','/library/metadata/201'):
             self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" parentRatingKey="{"100" if path.endswith("101") else "200"}" type="season" title="Season {1 if path.endswith("101") else 2}" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/103':
-            self.respond(f'<MediaContainer><Video ratingKey="103" parentRatingKey="201" grandparentRatingKey="200" {SHOW_FIELDS["103"]} type="episode" index="3" title="The return" duration="30000" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira (flashback)" thumb="/art/nadia.jpg"/></Video></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="103" parentRatingKey="201" grandparentRatingKey="200" {SHOW_FIELDS["103"]} type="episode" index="3" title="The return" duration="30000" thumb="/art/poster.jpg"><Media><Part id="1103" indexes="sd" key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira (flashback)" thumb="/art/nadia.jpg"/></Video></MediaContainer>');return
         if path=='/library/metadata/102':
-            self.respond(f'<MediaContainer><Video ratingKey="102" parentRatingKey="101" grandparentRatingKey="100" {SHOW_FIELDS["102"]} type="episode" index="9" title="The signal" duration="30000" viewOffset="{60000 if video_fixture.endswith("styled.mkv") else 4000}" thumb="/art/poster.jpg"><Media><Part key="/video/sample.mp4"/></Media><Director tag="Lena Hart"/>{MARKERS if markers and parse_qs(parsed.query).get("includeMarkers")==["1"] else ""}</Video></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" parentRatingKey="101" grandparentRatingKey="100" {SHOW_FIELDS["102"]} type="episode" index="9" title="The signal" duration="30000" viewOffset="{60000 if video_fixture.endswith("styled.mkv") else 4000}" thumb="/art/poster.jpg"><Media><Part id="1102" indexes="sd" key="/video/sample.mp4"/></Media><Director tag="Lena Hart"/>{MARKERS if markers and parse_qs(parsed.query).get("includeMarkers")==["1"] else ""}</Video></MediaContainer>');return
+        if path=='/library/metadata/302':
+            self.respond(GLASS_CITY);return
+        if path in ('/library/parts/1102/indexes/sd','/library/parts/1103/indexes/sd'):
+            self.respond(bif(),'application/octet-stream');return
         if path=='/photo/:/transcode':
             width=int(parse_qs(parsed.query).get('width',['240'])[0]);art=parse_qs(parsed.query).get('url',[''])[0];name=art.split('/')[-1] if art in ('/art/nadia.jpg','/art/omar.jpg',EXTERNAL_PORTRAIT) else ('high.jpg' if width>240 else 'low.jpg');data=(ROOT/name).read_bytes();self.respond(data,'image/jpeg');return
         if path=='/video/sample.mp4':

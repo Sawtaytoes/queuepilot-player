@@ -2,7 +2,7 @@ plugins { id 'com.android.application' }
 android {
     namespace 'dev.queuepilot.player'
     compileSdk 36
-    defaultConfig { applicationId 'dev.queuepilot.player.prototype'; minSdk 30; targetSdk 36; versionCode 7; versionName '0.5.2-preview' }
+    defaultConfig { applicationId 'dev.queuepilot.player.prototype'; minSdk 30; targetSdk 36; versionCode 8; versionName '0.5.3-preview' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     sourceSets.main.jniLibs.srcDirs = ['build/native-libs']
     sourceSets.main.assets.srcDirs += ['build/native-assets']
@@ -16,4 +16,6 @@ dependencies {
     implementation 'androidx.media3:media3-session:1.11.1'
     implementation 'androidx.media3:media3-exoplayer-hls:1.11.1'
     testImplementation 'junit:junit:4.13.2'
+    // Android's org.json is a stub in local unit tests; this is the reference implementation.
+    testImplementation 'org.json:json:20240303'
 }

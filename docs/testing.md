@@ -58,6 +58,9 @@ docker exec queuepilot-player-emulator python3 -u /source/tools/markers_smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/labels_smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/display_smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/display_smoke.py --density-320
+docker exec queuepilot-player-emulator python3 -u /source/tools/rail_smoke.py
+docker exec queuepilot-player-emulator python3 -u /source/tools/rail_smoke.py --density-320
+docker exec queuepilot-player-emulator python3 -u /source/tools/details_smoke.py
 docker exec queuepilot-player-emulator python3 -u /source/tools/layout_smoke.py
 ```
 
@@ -113,6 +116,28 @@ the smaller size, the choice survives a restart, a focused poster still draws it
 and every visible label stays on screen. It also opens a film with a long title and summary:
 the title is two lines, the summary is four, and More opens the full text. Run it once at the
 emulator's density and once with `--density-320`.
+`rail_smoke.py` checks the navigation rail at both densities: it is collapsed to icons while
+focus is in the content, every entry has an icon and a name, Left lands on the selected entry
+and expands the rail, the profile avatar stays reachable, Right collapses it again, and Back
+from the content returns to the rail. `details_smoke.py` opens the invented film Glass City
+and checks its facts line, genres, scores, time left, credits, and cast photos; checks the
+show facts above Orbit Nine's seasons; checks that every visible player control is a named
+icon button; and seeks the time bar with the D-pad. The fixture serves a seven-frame BIF for
+the episode's Part, so the preview must show the frame for the time it names, sit above the
+bar inside the screen, and be fetched once, on the first seek and not before.
+
+## Lucide icons
+
+The app's icons are Lucide icons converted to Android vector drawables. `tools/lucide/icons.txt`
+lists the icons in use. To add or refresh one, edit that list and run:
+
+```sh
+tools/lucide/fetch.sh            # downloads the pinned lucide-static release and checks its hash
+python3 tools/lucide/generate.py # writes res/drawable/lucide_*.xml
+```
+
+`tools/lucide/LICENSE` carries the Lucide ISC license and the MIT license of the Feather icons
+it derives from. Do not hand-edit a generated drawable.
 
 ## Repeatable Docker lab
 
@@ -129,7 +154,9 @@ fixtures above, then start it with absolute paths:
 The launcher runs the fixture service beside the headless Google Android TV emulator,
 mounts source read-only, gives the emulator its own Android home, and publishes no ports.
 It does not use the build signing cache or a household ADB connection. Wait for status to
-report `boot_completed=1` before testing. The test command runs the guarded sign-in,
+report `boot_completed=1` before testing. Start a fresh lab for each full run: one pass of the
+whole suite takes the emulator to about 8 GiB of the container's 10 GiB, and a second pass
+in the same session was killed by the memory limit on 2026-10-23. The test command runs the guarded sign-in,
 native playback and two-scale layout checks. Stop leaves the container configured for the
 next session; each emulator start wipes only its disposable guest. `remove` deletes only
 a container carrying the expected lab ownership label. Remove it before switching to

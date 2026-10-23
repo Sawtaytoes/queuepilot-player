@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Media3's player controls take their icons from these names; pointing them at the vendored
+     Lucide drawables gives the controls the same stroke icons as the rest of the app. -->
+<resources>
+  <drawable name="exo_styled_controls_play">@drawable/lucide_play</drawable>
+  <drawable name="exo_styled_controls_pause">@drawable/lucide_pause</drawable>
+  <drawable name="exo_styled_controls_previous">@drawable/lucide_skip_back</drawable>
+  <drawable name="exo_styled_controls_next">@drawable/lucide_skip_forward</drawable>
+  <drawable name="exo_styled_controls_rewind">@drawable/lucide_rotate_ccw</drawable>
+  <drawable name="exo_styled_controls_fastforward">@drawable/lucide_rotate_cw</drawable>
+  <drawable name="exo_styled_controls_settings">@drawable/lucide_settings</drawable>
+  <drawable name="exo_styled_controls_subtitle_on">@drawable/lucide_captions</drawable>
+  <drawable name="exo_styled_controls_subtitle_off">@drawable/lucide_captions_off</drawable>
+  <drawable name="exo_styled_controls_audiotrack">@drawable/lucide_audio_lines</drawable>
+  <drawable name="exo_styled_controls_speed">@drawable/lucide_gauge</drawable>
+  <drawable name="exo_styled_controls_fullscreen_enter">@drawable/lucide_maximize</drawable>
+  <drawable name="exo_styled_controls_fullscreen_exit">@drawable/lucide_minimize</drawable>
+  <drawable name="exo_styled_controls_check">@drawable/lucide_check</drawable>
+  <drawable name="exo_styled_controls_overflow_show">@drawable/lucide_ellipsis</drawable>
+  <drawable name="exo_styled_controls_overflow_hide">@drawable/lucide_chevron_left</drawable>
+</resources>

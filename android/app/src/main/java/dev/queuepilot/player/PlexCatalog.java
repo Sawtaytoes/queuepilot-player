@@ -28,7 +28,8 @@ final class PlexCatalog {
       int season,
       String seasonTitle,
       String showThumb,
-      String summary) {
+      String summary,
+      JSONObject facts) {
     JSONObject json() throws Exception {
       return new JSONObject()
           .put("key", key)
@@ -49,7 +50,8 @@ final class PlexCatalog {
           .put("season", season)
           .put("seasonTitle", seasonTitle)
           .put("showThumb", showThumb)
-          .put("summary", summary);
+          .put("summary", summary)
+          .put("facts", facts);
     }
 
     /** The large line: the show for an episode, otherwise this item's title. */
@@ -108,7 +110,8 @@ final class PlexCatalog {
           season,
           seasonTitle,
           showThumb,
-          summary);
+          summary,
+          facts);
     }
 
     static Entry fromJson(JSONObject j) {
@@ -132,7 +135,8 @@ final class PlexCatalog {
           j.optInt("season", EpisodeLabel.UNKNOWN),
           j.optString("seasonTitle"),
           j.optString("showThumb"),
-          j.optString("summary"));
+          j.optString("summary"),
+          j.optJSONObject("facts") == null ? new JSONObject() : j.optJSONObject("facts"));
     }
   }
 
@@ -235,7 +239,8 @@ final class PlexCatalog {
                   .put("season", seasonNumber(attribute(parser, "parentIndex")))
                   .put("seasonTitle", attribute(parser, "parentTitle"))
                   .put("showThumb", attribute(parser, "grandparentThumb"))
-                  .put("summary", attribute(parser, "summary"));
+                  .put("summary", attribute(parser, "summary"))
+                  .put("facts", facts(parser));
           itemDepth = parser.getDepth();
           cast.setLength(0);
         } else if (current != null && name.equals("Marker"))
@@ -247,8 +252,27 @@ final class PlexCatalog {
                       .put("start", number(attribute(parser, "startTimeOffset")))
                       .put("end", number(attribute(parser, "endTimeOffset")))
                       .put("isFinal", "1".equals(attribute(parser, "final"))));
-        else if (current != null && name.equals("Part") && current.optString("part").isEmpty())
+        else if (current != null && name.equals("Part") && current.optString("part").isEmpty()) {
           current.put("part", attribute(parser, "key"));
+          // indexes="sd" means a BIF of seek thumbnails at /library/parts/<id>/indexes/sd.
+          current
+              .getJSONObject("facts")
+              .put("partId", attribute(parser, "id"))
+              .put("indexes", attribute(parser, "indexes"));
+        } else if (current != null
+            && java.util.Set.of("Genre", "Country").contains(name)
+            && parser.getDepth() == itemDepth + 1)
+          append(
+              current.getJSONObject("facts"),
+              name.equals("Genre") ? "genres" : "countries",
+              parser);
+        else if (current != null && name.equals("Media") && parser.getDepth() == itemDepth + 1) {
+          JSONObject facts = current.getJSONObject("facts");
+          if (!facts.has("videoResolution"))
+            facts
+                .put("videoResolution", attribute(parser, "videoResolution"))
+                .put("audioChannels", attribute(parser, "audioChannels"));
+        }
         else if (current != null
             && java.util.Set.of("Role", "Director", "Writer", "Producer").contains(name)) {
           current
@@ -289,6 +313,37 @@ final class PlexCatalog {
     } catch (NumberFormatException e) {
       return -1;
     }
+  }
+
+  /** Title facts a detail screen shows; every value is optional and kept as Plex sent it. */
+  private static final String[] FACTS = {
+    "year",
+    "contentRating",
+    "studio",
+    "rating",
+    "audienceRating",
+    "originallyAvailableAt",
+    "leafCount",
+    "viewedLeafCount",
+    "childCount",
+    "viewCount",
+    "tagline",
+  };
+
+  private static JSONObject facts(XmlPullParser parser) throws Exception {
+    JSONObject facts = new JSONObject().put("genres", new JSONArray());
+    for (String name : FACTS) {
+      String value = attribute(parser, name);
+      if (!value.isEmpty()) facts.put(name, value);
+    }
+    return facts;
+  }
+
+  private static void append(JSONObject facts, String key, XmlPullParser parser)
+      throws Exception {
+    JSONArray list = facts.optJSONArray(key);
+    if (list == null) facts.put(key, list = new JSONArray());
+    list.put(attribute(parser, "tag"));
   }
 
   private static String attribute(XmlPullParser parser, String key) {

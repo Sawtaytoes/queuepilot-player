@@ -1,0 +1,33 @@
+# Lucide icons vendored into the app. One name per line; generate.py writes
+# res/drawable/lucide_<name>.xml for each. Version and integrity: fetch.sh.
+arrow-left
+arrow-left-right
+audio-lines
+captions
+captions-off
+check
+chevron-left
+chevrons-right
+circle-user-round
+ellipsis
+film
+gauge
+house
+image
+library-big
+list-filter
+list-video
+maximize
+minimize
+pause
+play
+rotate-ccw
+rotate-cw
+scaling
+settings
+skip-back
+skip-forward
+sparkles
+text
+tv
+users

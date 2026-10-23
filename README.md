@@ -15,7 +15,9 @@ Plex server address needs to be entered on the television. The profile picker ma
 protected profile **🔒 PIN** and the account owner **Owner**; other profiles carry no label.
 
 The home screen follows the approved queue-first presentation: a left navigation rail,
-queues first, continuation below, and library browsing. Home lists every queue, the ones
+queues first, continuation below, and library browsing. The rail shows icons only while
+focus is in the content and expands with labels when focus moves left onto it; Left lands on
+the selected entry, and Back from a top-level screen returns to the rail. Home lists every queue, the ones
 that play as the active profile first and those that switch profile after, each in the
 server's order. A card names its audience as text ("Ada, Grace") beside the faces, and a
 switching card names the profile it switches to. While a people filter is active, Home and
@@ -30,6 +32,16 @@ catalog for reviewing the same native layout without an account.
 percent, and applies at once. Grids gain columns at smaller sizes. The Media3 control groups
 are scaled about their anchored edge. The title screen keeps a long title to two lines and a
 summary to four, with **More** for the full text.
+
+A title screen shows what Plex sends about the title: year, content rating, length or season
+and episode counts, studio, genres, critic and audience scores, time left or episodes
+watched, director and writers, and a cast row with portraits. A show's season list and a
+season's episode list start with the same facts for that show or season.
+
+Icons are [Lucide](https://lucide.dev) icons, vendored as Android vector drawables from
+the pinned `lucide-static` release under its ISC license (`tools/lucide/LICENSE`). They mark
+the rail, the player controls, Skip, the Settings rows, the queue card labels, and the title
+actions. Each one sits beside a text label or carries a spoken name.
 
 Credentials and the profile roster are encrypted with Android Keystore. Previously connected
 unprotected profiles can use their saved server credentials and catalog cache without a
@@ -74,6 +86,11 @@ when playback leaves the marker. Final credits (Plex's `final` flag, or credits 
 two seconds of the end) finish the title instead: Plex receives a finished timeline and a
 queue moves to its next item. Skips never leave an authored queue section, and nothing is
 skipped automatically.
+While the time bar is moved, by touch or with the D-pad, a preview of the frame at that time
+appears above the bar with the time beneath it. The thumbnails come from Plex's seek index
+(`/library/parts/<id>/indexes/sd`, a BIF file), fetched on the first seek of a title and
+only when Plex reports one; a file over 32 MB or one that does not parse is ignored, and the
+time is shown alone. Queue playback keeps the preview inside the authored section.
 Player focus highlights are rounded, including the seek buttons with interval labels.
 Options use QueuePilot panels with visible selections and D-pad focus. Browsing/settings
 use a side panel; playback audio, subtitle and speed menus stay above their launching
@@ -114,7 +131,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.2.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.5.3.md).
 The repeatable `tools/tv-lab.sh` launcher keeps a named headless Docker lab available
 without involving a household TV; start/status/test/stop commands are documented there.
 

@@ -20,7 +20,7 @@ assert s.adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','gol
 s.post('_online');s.post('_ass');s.adb('shell','pm','clear',s.PACKAGE);s.adb('logcat','-c');s.launch()
 if 'Sign in with Plex' in s.text():
     s.click('Sign in with Plex');s.contains('ABCD');s.post('_claim');s.contains("Who's watching?");s.click('Ada');s.contains('What are we watching?')
-s.click('Home');s.click('Series');s.click('Series');s.click('Orbit Nine');s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play')
+s.click('Home');s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play')
 time.sleep(6);s.shot('ass-authored');time.sleep(2);s.shot('ass-moving')
 logs=s.adb('logcat','-d','-s','QueuePilotLibass').decode()
 assert 'ABeeZee' in logs,logs

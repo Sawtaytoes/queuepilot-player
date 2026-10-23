@@ -111,8 +111,43 @@ final class TvUi {
     return v;
   }
 
+  /** A button that leads with a Lucide icon drawn in the button's own text color. */
+  TextView button(String label, int icon, Runnable action, boolean primary) {
+    TextView v = button(label, action, primary);
+    withIcon(v, icon);
+    return v;
+  }
+
+  /**
+   * Puts a Lucide icon before a label. The icon is tinted with the label's color, so it needs
+   * no color of its own, and it follows the Display size with the text.
+   */
+  void withIcon(TextView view, int icon) {
+    android.graphics.drawable.Drawable drawable = context.getDrawable(icon).mutate();
+    int size = Math.round(view.getTextSize() * 1.25f);
+    drawable.setBounds(0, 0, size, size);
+    view.setCompoundDrawablesRelative(drawable, null, null, null);
+    view.setCompoundDrawablePadding(dp(9));
+    view.setCompoundDrawableTintList(view.getTextColors());
+  }
+
+  /** A standalone Lucide icon in an existing color. */
+  ImageView icon(int icon, int color, int size) {
+    ImageView v = new ImageView(context);
+    v.setImageResource(icon);
+    v.setImageTintList(android.content.res.ColorStateList.valueOf(color));
+    v.setLayoutParams(new LinearLayout.LayoutParams(dp(size), dp(size)));
+    v.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    return v;
+  }
+
   void action(LinearLayout row, String title, Runnable action, boolean primary) {
+    action(row, title, 0, action, primary);
+  }
+
+  void action(LinearLayout row, String title, int icon, Runnable action, boolean primary) {
     TextView button = button(title, action, primary);
+    if (icon != 0) withIcon(button, icon);
     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
     lp.setMargins(0, 0, dp(12), 0);
     row.addView(button, lp);
@@ -120,9 +155,24 @@ final class TvUi {
 
   LinearLayout card(
       String eyebrow, String title, String description, String action, Runnable click, int width) {
+    return card(eyebrow, 0, title, description, action, click, width);
+  }
+
+  /** A card whose eyebrow leads with a Lucide icon; {@code icon} 0 means none. */
+  LinearLayout card(
+      String eyebrow,
+      int icon,
+      String title,
+      String description,
+      String action,
+      Runnable click,
+      int width) {
     LinearLayout card = column();
     card.setPadding(dp(22), dp(22), dp(22), dp(20));
-    card.addView(text(eyebrow.toUpperCase(java.util.Locale.ROOT), 12, ACCENT));
+    TextView label = text(eyebrow.toUpperCase(java.util.Locale.ROOT), 12, ACCENT);
+    label.setTag("card-eyebrow");
+    if (icon != 0) withIcon(label, icon);
+    card.addView(label);
     gap(card, 14);
     card.addView(title(title, 23));
     gap(card, 12);

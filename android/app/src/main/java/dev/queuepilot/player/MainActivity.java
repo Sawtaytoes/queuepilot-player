@@ -119,6 +119,16 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             new androidx.activity.OnBackPressedCallback(true) {
               @Override
               public void handleOnBackPressed() {
+                View focused = getWindow().getDecorView().findFocus();
+                if (playerView == null
+                    && isTopLevel()
+                    && railSelected != null
+                    && rail.isAttachedToWindow()
+                    && focused != null
+                    && !isInRail(focused)) {
+                  railSelected.requestFocus();
+                  return;
+                }
                 back();
               }
             });
@@ -128,6 +138,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             View.SYSTEM_UI_FLAG_FULLSCREEN
                 | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+    getWindow()
+        .getDecorView()
+        .getViewTreeObserver()
+        .addOnGlobalFocusChangeListener(this::railFocusMoved);
     boolean emulator =
         android.os.Build.HARDWARE.equals("ranchu") || android.os.Build.HARDWARE.equals("goldfish");
     // Test routing is accepted only on the disposable emulator, never on a household device.
@@ -230,20 +244,66 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
   }
 
+  /** The rail shows icons only while focus is in the content, and its labels when focused. */
+  private static final int RAIL_COLLAPSED = 76, RAIL_EXPANDED = 186, RAIL_MILLIS = 120;
+
+  private LinearLayout rail;
+  private View railSelected;
+  private final List<View> railLabels = new ArrayList<>();
+  private boolean isRailExpanded;
+  private android.animation.ValueAnimator railAnimation;
+
   private void shell(String selected) {
-    LinearLayout root = ui.row();
+    FrameLayout root = new FrameLayout(this);
     root.setBackgroundColor(TvUi.BG);
-    LinearLayout rail = ui.column();
-    rail.setPadding(dp(18), dp(28), dp(18), dp(22));
+    ScrollView scroll = new ScrollView(this);
+    scroll.setFillViewport(true);
+    scroll.setClipToPadding(false);
+    content = ui.column();
+    content.setPadding(dp(36), dp(28), dp(32), dp(36));
+    scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+    FrameLayout.LayoutParams scrollParams = new FrameLayout.LayoutParams(-1, -1);
+    scrollParams.leftMargin = dp(RAIL_COLLAPSED);
+    root.addView(scroll, scrollParams);
+
+    // The expanded rail is drawn over the content, so opening it never reflows a grid.
+    rail = ui.column();
+    railLabels.clear();
+    railSelected = null;
+    isRailExpanded = false;
+    rail.setPadding(dp(12), dp(28), dp(12), dp(22));
     rail.setBackgroundColor(0xff14171f);
-    root.addView(rail, new LinearLayout.LayoutParams(dp(174), -1));
-    rail.addView(ui.title("◉  QueuePilot", 20));
+    rail.setTag("rail");
+    rail.setContentDescription("Navigation, collapsed");
+    root.addView(rail, new FrameLayout.LayoutParams(dp(RAIL_COLLAPSED), -1));
+    LinearLayout brand = ui.row();
+    brand.setGravity(Gravity.CENTER_VERTICAL);
+    brand.setPadding(dp(15), 0, 0, 0);
+    TextView mark = ui.title("◉", 20);
+    brand.addView(mark);
+    TextView name = ui.title("QueuePilot", 20);
+    name.setPadding(dp(12), 0, 0, 0);
+    name.setSingleLine(true);
+    brand.addView(name);
+    railLabels.add(name);
+    rail.addView(brand);
     ui.gap(rail, 36);
-    nav(rail, "Home", selected, () -> home());
-    nav(rail, "Watching", selected, () -> navigate(new Screen("queues")));
-    nav(rail, "Series", selected, () -> browseType("show", "Series"));
-    nav(rail, "Movies", selected, () -> browseType("movie", "Movies"));
-    nav(rail, "Settings", selected, () -> navigate(new Screen("settings")));
+    nav(rail, "Home", R.drawable.lucide_house, selected, () -> home());
+    nav(
+        rail,
+        "Watching",
+        R.drawable.lucide_list_video,
+        selected,
+        () -> navigate(new Screen("queues")));
+    nav(rail, "Series", R.drawable.lucide_tv, selected, () -> browseType("show", "Series"));
+    nav(rail, "Movies", R.drawable.lucide_film, selected, () -> browseType("movie", "Movies"));
+    View settingsEntry =
+        nav(
+            rail,
+            "Settings",
+            R.drawable.lucide_settings,
+            selected,
+            () -> navigate(new Screen("settings")));
     rail.addView(new View(this), new LinearLayout.LayoutParams(1, 0, 1));
     // The avatar alone switches profile; the name is spoken, and shown in the switcher.
     ImageView face = avatar(44);
@@ -266,13 +326,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         (v, focused) -> v.setBackground(ui.shape(0, focused ? TvUi.ACCENT : 0, 40)));
     profileButton.setContentDescription("Switch profile, " + profileName());
     rail.addView(profileButton, new LinearLayout.LayoutParams(-2, -2));
-    ScrollView scroll = new ScrollView(this);
-    scroll.setFillViewport(true);
-    scroll.setClipToPadding(false);
-    content = ui.column();
-    content.setPadding(dp(36), dp(28), dp(32), dp(36));
-    scroll.addView(content, new ScrollView.LayoutParams(-1, -2));
-    root.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
+    // The gap above the avatar is tall, so a plain focus search from Settings would reach
+    // the nearer content instead; Down and Up stay in the rail.
+    settingsEntry.setId(View.generateViewId());
+    profileButton.setId(View.generateViewId());
+    settingsEntry.setNextFocusDownId(profileButton.getId());
+    profileButton.setNextFocusUpId(settingsEntry.getId());
+    for (View label : railLabels) label.setVisibility(View.GONE);
     // In Display-size-scaled dp, so a smaller size leaves room for more columns.
     mainWidth =
         Math.max(
@@ -280,29 +340,99 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             Math.round(
                     getResources().getDisplayMetrics().widthPixels
                         / (getResources().getDisplayMetrics().density * ui.scale))
-                - 174
+                - RAIL_COLLAPSED
                 - 68);
     setContentView(root);
   }
 
-  private void nav(LinearLayout rail, String label, String selected, Runnable action) {
-    TextView v = ui.button(label, action, false);
-    v.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-    v.setTextColor(TvUi.MUTED);
-    v.setBackground(ui.shape(Color.TRANSPARENT, 0, 8));
-    v.setOnFocusChangeListener(
-        (view, focused) ->
-            view.setBackground(ui.shape(Color.TRANSPARENT, focused ? TvUi.ACCENT : 0, 8)));
-    if (label.equals(selected)) {
-      v.setOnFocusChangeListener(
-          (view, focused) ->
-              view.setBackground(ui.shape(0xff293122, focused ? TvUi.ACCENT : 0, 8)));
-      v.setTextColor(TvUi.ACCENT);
-      v.setBackground(ui.shape(0xff293122, 0, 8));
+  private View nav(LinearLayout rail, String label, int icon, String selected, Runnable action) {
+    boolean isSelected = label.equals(selected);
+    LinearLayout entry = ui.row();
+    entry.setGravity(Gravity.CENTER_VERTICAL);
+    entry.setPadding(dp(15), 0, dp(12), 0);
+    int color = isSelected ? TvUi.ACCENT : TvUi.MUTED;
+    ImageView glyph = ui.icon(icon, color, 22);
+    entry.addView(glyph);
+    TextView text = ui.text(label, 16, color);
+    text.setTypeface(
+        android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+    text.setPadding(dp(14), 0, 0, 0);
+    text.setSingleLine(true);
+    text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+    entry.addView(text);
+    railLabels.add(text);
+    entry.setContentDescription(label);
+    int fill = isSelected ? 0xff293122 : Color.TRANSPARENT;
+    ui.focusable(entry, action, fill, 8);
+    // Focus fills the entry with the accent and draws the icon and label in the background
+    // color: the "filled" state, using only existing colors.
+    entry.setOnFocusChangeListener(
+        (view, focused) -> {
+          view.setBackground(ui.shape(focused ? TvUi.ACCENT : fill, 0, 8));
+          int ink = focused ? TvUi.BG : color;
+          glyph.setImageTintList(android.content.res.ColorStateList.valueOf(ink));
+          text.setTextColor(ink);
+        });
+    if (isSelected) {
+      entry.setSelected(true);
+      railSelected = entry;
     }
     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(46));
     lp.bottomMargin = dp(5);
-    rail.addView(v, lp);
+    rail.addView(entry, lp);
+    return entry;
+  }
+
+  private boolean isInRail(View view) {
+    for (View v = view; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null)
+      if (v == rail) return true;
+    return false;
+  }
+
+  /** Expands the rail when focus moves onto it, and collapses it when focus enters content. */
+  private void railFocusMoved(View from, View to) {
+    if (rail == null || to == null || !rail.isAttachedToWindow()) return;
+    boolean isRail = isInRail(to);
+    if (isRail && from != null && !isInRail(from) && railSelected != null && to != railSelected) {
+      View target = railSelected;
+      target.post(target::requestFocus);
+    }
+    setRailExpanded(isRail);
+  }
+
+  private void setRailExpanded(boolean isExpanded) {
+    if (isExpanded == isRailExpanded) return;
+    isRailExpanded = isExpanded;
+    if (railAnimation != null) railAnimation.cancel();
+    View target = rail;
+    int from = target.getWidth(), to = dp(isExpanded ? RAIL_EXPANDED : RAIL_COLLAPSED);
+    if (isExpanded) for (View label : railLabels) label.setVisibility(View.VISIBLE);
+    railAnimation = android.animation.ValueAnimator.ofInt(from, to);
+    railAnimation.setDuration(RAIL_MILLIS);
+    railAnimation.addUpdateListener(
+        a -> {
+          target.getLayoutParams().width = (int) a.getAnimatedValue();
+          target.requestLayout();
+        });
+    railAnimation.addListener(
+        new android.animation.AnimatorListenerAdapter() {
+          @Override
+          public void onAnimationEnd(android.animation.Animator animation) {
+            if (!isRailExpanded) for (View label : railLabels) label.setVisibility(View.GONE);
+          }
+        });
+    railAnimation.start();
+    rail.setContentDescription(isExpanded ? "Navigation, expanded" : "Navigation, collapsed");
+  }
+
+  /** Top-level screens send Back from their content to the rail rather than leaving. */
+  private boolean isTopLevel() {
+    if (current == null) return false;
+    return switch (current.kind()) {
+      case "home", "queues", "settings" -> true;
+      case "library" -> "/library/sections".equals(current.path());
+      default -> false;
+    };
   }
 
   private void heading(String eyebrow, String title) {
@@ -653,6 +783,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout card =
         ui.card(
             isOtherProfile ? "Switches to " + queue.optString("requiredProfile") : kind,
+            isOtherProfile
+                ? R.drawable.lucide_arrow_left_right
+                : kind.equals("Rules") ? R.drawable.lucide_list_filter : R.drawable.lucide_sparkles,
             queue.optString("title", "Movies & Shows"),
             queueAudience(queue),
             "Play queue",
@@ -776,7 +909,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             14,
             TvUi.MUTED));
     ui.gap(hero, 14);
-    TextView resume = ui.button("Resume queue", () -> startNativeQueue(queue), true);
+    TextView resume =
+        ui.button("Resume queue", R.drawable.lucide_play, () -> startNativeQueue(queue), true);
     resume.setContentDescription(
         "Resume queue. "
             + queue.optString("title")
@@ -862,7 +996,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     if (!line.isEmpty()) labels.addView(ui.text(line, 16, TvUi.MUTED));
     ui.gap(labels, 14);
     TextView view =
-        ui.button("View title", () -> navigate(new Screen("details", "", "", entry)), true);
+        ui.button(
+            "View title",
+            R.drawable.lucide_film,
+            () -> navigate(new Screen("details", "", "", entry)),
+            true);
     view.setContentDescription("View title. " + entry.spoken());
     labels.addView(view);
     hero.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
@@ -1369,6 +1507,14 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     shell(title.equals("Series") ? "Series" : title.equals("Movies") ? "Movies" : "");
     heading("Your library", title);
     status.setText("Loading your library…");
+    java.util.regex.Matcher parent =
+        java.util.regex.Pattern.compile("/library/metadata/(\\d+)/children").matcher(path);
+    if (parent.matches() && current.page() == 0) {
+      // A show or season lists its children under its own summary, facts and cast.
+      LinearLayout header = ui.column();
+      content.addView(header);
+      loadParentHeader(parent.group(1), header);
+    }
     int page = current.page();
     boolean paged = !path.equals("/library/sections");
     String requestPath =
@@ -1393,7 +1539,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           status.setText(
               cached
                   ? "Saved listing · your server is currently unavailable"
-                  : entries.length() + " titles");
+                  : entries.length() + (entries.length() == 1 ? " title" : " titles"));
           if (entries.length() == 0) {
             status.setText(
                 page == 0
@@ -1449,9 +1595,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     card.setPadding(dp(3), dp(3), dp(3), dp(10));
     int width = itemWidth(columns(5));
     if (entry.type().equals("library")) {
-      TextView icon = ui.title("▤", 48);
-      icon.setGravity(Gravity.CENTER);
-      card.addView(icon, new LinearLayout.LayoutParams(-1, dp(150)));
+      FrameLayout tile = new FrameLayout(this);
+      tile.setBackgroundColor(TvUi.PANEL);
+      ImageView icon = ui.icon(R.drawable.lucide_library_big, TvUi.ACCENT, 48);
+      tile.addView(icon, new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER));
+      card.addView(tile, new LinearLayout.LayoutParams(-1, dp(150)));
     } else {
       ImageView image = new ImageView(this);
       image.setScaleType(ImageView.ScaleType.CENTER_CROP);
@@ -1546,6 +1694,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     info.setPadding(dp(28), dp(4), 0, 0);
     row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
     info.addView(ui.text("Watch with " + profileName(), 15, TvUi.MUTED));
+    ui.gap(info, 10);
+    // Year, rating, length and studio; genres; scores; watch state; director and writer.
+    LinearLayout facts = ui.column();
+    info.addView(facts);
+    fillDetailFacts(facts, entry);
     ui.gap(info, 14);
     TextView more = null;
     if (!entry.summary().isBlank()) {
@@ -1559,6 +1712,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       more =
           ui.button(
               "More",
+              R.drawable.lucide_text,
               () ->
                   panel()
                       .setTitle(entry.primary())
@@ -1584,7 +1738,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           });
     }
     LinearLayout actions = ui.row();
-    TextView play = ui.button("Play", () -> playEntry(entry), true);
+    TextView play = ui.button("Play", R.drawable.lucide_play, () -> playEntry(entry), true);
     actions.addView(play);
     if (more != null) {
       LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2);
@@ -1593,10 +1747,161 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
     LinearLayout.LayoutParams art = new LinearLayout.LayoutParams(-2, -2);
     art.leftMargin = dp(12);
-    actions.addView(ui.button("Artwork quality", () -> compareArt(entry), false), art);
+    actions.addView(
+        ui.button("Artwork quality", R.drawable.lucide_image, () -> compareArt(entry), false), art);
     info.addView(actions);
     content.addView(row);
+    LinearLayout castArea = ui.column();
+    content.addView(castArea);
+    fillCastRow(castArea, entry);
     focusFirst(play);
+    loadFullDetails(entry, facts, castArea);
+  }
+
+  private void fillDetailFacts(LinearLayout facts, PlexCatalog.Entry entry) {
+    facts.removeAllViews();
+    String[][] lines = {
+      {"details-meta", DetailFacts.meta(entry.type(), entry.facts(), entry.duration())},
+      {"details-genres", DetailFacts.genres(entry.facts())},
+      {"details-ratings", DetailFacts.ratings(entry.facts())},
+      {
+        "details-progress",
+        DetailFacts.progress(entry.type(), entry.resume(), entry.duration(), entry.facts())
+      },
+      {"details-credits", DetailFacts.credits(entry.roles())},
+    };
+    for (String[] line : lines) {
+      if (line[1].isEmpty()) continue;
+      int color = line[0].equals("details-meta") ? TvUi.WHITE : TvUi.MUTED;
+      TextView text = ui.text(line[1], 15, color);
+      text.setTag(line[0]);
+      text.setMaxLines(2);
+      text.setEllipsize(TextUtils.TruncateAt.END);
+      facts.addView(text);
+      ui.gap(facts, 5);
+    }
+  }
+
+  /** The title's actors as a row of faces, the way the Plex detail page shows them. */
+  private void fillCastRow(LinearLayout area, PlexCatalog.Entry entry) {
+    area.removeAllViews();
+    List<JSONObject> actors = DetailFacts.actors(entry.roles());
+    if (actors.isEmpty()) return;
+    ui.gap(area, 26);
+    area.addView(ui.title("Cast", 20));
+    ui.gap(area, 12);
+    LinearLayout row = horizontalIn(area);
+    String origin = server(), secret = token();
+    for (JSONObject actor : actors.subList(0, Math.min(12, actors.size()))) {
+      LinearLayout card = ui.column();
+      card.setGravity(Gravity.CENTER_HORIZONTAL);
+      card.setPadding(dp(6), dp(8), dp(6), dp(8));
+      ImageView face = avatar(84);
+      card.addView(face);
+      loadCastPhoto(face, actor.optString("thumb"), actor.optString("name"), origin, secret);
+      ui.gap(card, 8);
+      TextView name = ui.title(actor.optString("name"), 14);
+      name.setGravity(Gravity.CENTER);
+      name.setMaxLines(2);
+      name.setEllipsize(TextUtils.TruncateAt.END);
+      card.addView(name);
+      TextView role = ui.text(actor.optString("role"), 12, TvUi.MUTED);
+      role.setGravity(Gravity.CENTER);
+      role.setMaxLines(2);
+      role.setEllipsize(TextUtils.TruncateAt.END);
+      card.addView(role);
+      ui.focusable(
+          card, () -> message(actor.optString("name"), actor.optString("role")), TvUi.BG);
+      card.setContentDescription(actor.optString("name") + ". " + actor.optString("role"));
+      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(124), -2);
+      lp.rightMargin = dp(10);
+      row.addView(card, lp);
+    }
+  }
+
+  private LinearLayout horizontalIn(LinearLayout parent) {
+    HorizontalScrollView scroll = new HorizontalScrollView(this);
+    scroll.setHorizontalScrollBarEnabled(false);
+    scroll.setClipToPadding(false);
+    LinearLayout row = ui.row();
+    row.setPadding(dp(3), dp(3), dp(3), dp(3));
+    scroll.addView(row);
+    parent.addView(scroll);
+    return row;
+  }
+
+  /**
+   * A listing carries only part of a title's metadata, so the full record is read once the
+   * screen is showing; an episode's cast is completed from its season and show.
+   */
+  private void loadFullDetails(
+      PlexCatalog.Entry entry, LinearLayout facts, LinearLayout castArea) {
+    if (profile == null || entry.key().isEmpty()) return;
+    int request = generation;
+    String origin = server(), secret = token();
+    network.execute(
+        () -> {
+          try {
+            JSONArray items =
+                PlexCatalog.list(
+                    PlexCatalog.get(
+                        PlexCatalog.url(origin, "/library/metadata/" + entry.key()),
+                        secret,
+                        16 * 1024 * 1024));
+            if (items.length() == 0) return;
+            PlexCatalog.Entry listed = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
+            PlexCatalog.Entry full = withInheritedCast(listed, origin, secret);
+            runOnUiThread(
+                () -> {
+                  if (request != generation) return;
+                  fillDetailFacts(facts, full);
+                  fillCastRow(castArea, full);
+                });
+          } catch (Exception ignored) {
+            // The listing's facts stay; the screen is still usable without the full record.
+          }
+        });
+  }
+
+  private void loadParentHeader(String key, LinearLayout header) {
+    int request = generation;
+    String origin = server(), secret = token();
+    network.execute(
+        () -> {
+          try {
+            JSONArray items =
+                PlexCatalog.list(
+                    PlexCatalog.get(
+                        PlexCatalog.url(origin, "/library/metadata/" + key),
+                        secret,
+                        16 * 1024 * 1024));
+            if (items.length() == 0) return;
+            PlexCatalog.Entry listed = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
+            PlexCatalog.Entry parent = withInheritedCast(listed, origin, secret);
+            if (!Set.of("show", "season").contains(parent.type())) return;
+            runOnUiThread(
+                () -> {
+                  if (request != generation) return;
+                  LinearLayout facts = ui.column();
+                  header.addView(facts);
+                  fillDetailFacts(facts, parent);
+                  if (!parent.summary().isBlank()) {
+                    TextView summary = ui.text(parent.summary().trim(), 15, TvUi.WHITE);
+                    summary.setTag("parent-summary");
+                    summary.setMaxLines(3);
+                    summary.setEllipsize(TextUtils.TruncateAt.END);
+                    ui.gap(header, 6);
+                    header.addView(summary);
+                  }
+                  LinearLayout cast = ui.column();
+                  header.addView(cast);
+                  fillCastRow(cast, parent);
+                  ui.gap(header, 22);
+                });
+          } catch (Exception ignored) {
+            // The listing still works without its parent's header.
+          }
+        });
   }
 
   private void compareArt(PlexCatalog.Entry entry) {
@@ -1712,11 +2017,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.gap(overlay, 10);
     LinearLayout actions = ui.row();
     overlay.addView(actions);
-    ui.action(actions, "Cast", () -> showCast(playingEntry), false);
+    ui.action(actions, "Cast", R.drawable.lucide_users, () -> showCast(playingEntry), false);
     if (nativePlan != null)
       ui.action(
           actions,
           "Next queue item",
+          R.drawable.lucide_skip_forward,
           () -> {
             if (advancing) return;
             reportPlayback("skip");
@@ -1725,13 +2031,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             loadNativeItem();
           },
           false);
-    ui.action(actions, "Back to title", this::back, false);
+    ui.action(actions, "Back to title", R.drawable.lucide_arrow_left, this::back, false);
     root.addView(overlay, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
     playingMarkers = playingEntry == null ? List.of() : playingEntry.skipMarkers();
     skipMarker = null;
     isSkipDismissed = false;
     isControllerVisible = false;
-    skipButton = ui.button("Skip Intro", this::skipMarker, true);
+    skipButton = ui.button("Skip Intro", R.drawable.lucide_chevrons_right, this::skipMarker, true);
     skipButton.setTag("skip-marker");
     skipButton.setVisibility(View.GONE);
     FrameLayout.LayoutParams skipLayout =
@@ -1760,6 +2066,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     installPlaybackMenus();
     roundPlayerControls(playerView);
     scalePlayerControls(playerView);
+    installSeekPreview(root);
     rewind.reset();
     playerView.setControllerShowTimeoutMs(3500);
     playerView.setControllerVisibilityListener(
@@ -1977,7 +2284,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       return;
     }
     Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
-    ui.action(content, "Choose people", this::chooseQueuePeople, false);
+    ui.action(content, "Choose people", R.drawable.lucide_users, this::chooseQueuePeople, false);
     status.setText(selected.isEmpty() ? "All queues · loading…" : "Finding your queues…");
     LinearLayout area = ui.column();
     ui.gap(content, 16);
@@ -2367,6 +2674,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     row.addView(
         ui.card(
             "Plex account",
+            R.drawable.lucide_circle_user_round,
             account.optString("name", "Connect Plex"),
             "Sign in on your phone using a TV code.",
             "Sign in with Plex",
@@ -2375,6 +2683,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     row.addView(
         ui.card(
             "QueuePilot",
+            R.drawable.lucide_list_video,
             "Your queue server",
             "Connect the server that manages your watching queues.",
             "Connect QueuePilot",
@@ -2383,6 +2692,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     row.addView(
         ui.card(
             "Plex Home",
+            R.drawable.lucide_users,
             "Who's watching?",
             "Choose a profile and its library access.",
             "Switch profile",
@@ -2390,12 +2700,14 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             270));
     ui.gap(content, 22);
     LinearLayout preferences = ui.row();
-    TextView rewindButton = ui.button(rewindLabel(), this::rewindSetting, false);
+    TextView rewindButton =
+        ui.button(rewindLabel(), R.drawable.lucide_rotate_ccw, this::rewindSetting, false);
     rewindButton.setTag("rewind-setting");
     preferences.addView(rewindButton);
     TextView sizeButton =
         ui.button(
             "Display size · " + DisplaySize.label(displayPercent()),
+            R.drawable.lucide_scaling,
             this::displaySizeSetting,
             false);
     LinearLayout.LayoutParams sizeGap = new LinearLayout.LayoutParams(-2, -2);
@@ -2403,6 +2715,144 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     preferences.addView(sizeButton, sizeGap);
     content.addView(preferences);
     focusFirst(row.getChildAt(0));
+  }
+
+  private LinearLayout seekPreview;
+  private ImageView seekPreviewImage;
+  private TextView seekPreviewTime;
+  private BifIndex seekIndex;
+  private boolean isSeekIndexRequested;
+  private int seekPreviewFrame = -1;
+
+  /**
+   * Seek thumbnails: while the time bar is scrubbed, by touch or by D-pad, a rounded preview of
+   * the frame at that time sits above the bar with the time beneath it. The BIF is fetched only
+   * on the first scrub, and only the frame being shown is decoded.
+   */
+  private void installSeekPreview(FrameLayout root) {
+    seekIndex = null;
+    isSeekIndexRequested = false;
+    seekPreviewFrame = -1;
+    View bar = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+    if (!(bar instanceof androidx.media3.ui.TimeBar timeBar)) return;
+    LinearLayout box = ui.column();
+    box.setGravity(Gravity.CENTER_HORIZONTAL);
+    box.setVisibility(View.GONE);
+    ImageView image = new ImageView(this);
+    image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+    image.setBackground(ui.shape(TvUi.PANEL, TvUi.WHITE, 12));
+    image.setClipToOutline(true);
+    box.addView(image, new LinearLayout.LayoutParams(dp(240), dp(135)));
+    ui.gap(box, 8);
+    TextView time = ui.text("", 16, TvUi.WHITE);
+    time.setPadding(dp(10), dp(4), dp(10), dp(4));
+    time.setBackground(ui.shape(TvUi.BG, 0, 8));
+    box.addView(time);
+    root.addView(box, new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START));
+    seekPreview = box;
+    seekPreviewImage = image;
+    seekPreviewTime = time;
+    timeBar.addListener(
+        new androidx.media3.ui.TimeBar.OnScrubListener() {
+          @Override
+          public void onScrubStart(androidx.media3.ui.TimeBar t, long position) {
+            requestSeekIndex();
+            showSeekPreview(bar, position);
+          }
+
+          @Override
+          public void onScrubMove(androidx.media3.ui.TimeBar t, long position) {
+            showSeekPreview(bar, position);
+          }
+
+          @Override
+          public void onScrubStop(androidx.media3.ui.TimeBar t, long position, boolean canceled) {
+            box.setVisibility(View.GONE);
+          }
+        });
+  }
+
+  private void requestSeekIndex() {
+    PlexCatalog.Entry entry = playingEntry;
+    if (isSeekIndexRequested || entry == null) return;
+    isSeekIndexRequested = true;
+    String partId = entry.facts().optString("partId"), indexes = entry.facts().optString("indexes");
+    if (partId.isEmpty() || !java.util.Arrays.asList(indexes.split(",")).contains("sd")) return;
+    String origin = playingOrigin.isEmpty() ? server() : playingOrigin, secret = playingToken;
+    int request = generation;
+    network.execute(
+        () -> {
+          try {
+            byte[] bytes =
+                PlexCatalog.get(
+                    PlexCatalog.url(origin, "/library/parts/" + partId + "/indexes/sd"),
+                    secret,
+                    BifIndex.MAX_BYTES);
+            BifIndex index = BifIndex.parse(bytes);
+            runOnUiThread(
+                () -> {
+                  if (request != generation || playingEntry != entry) return;
+                  seekIndex = index;
+                  seekPreviewFrame = -1;
+                  if (seekPreview != null && seekPreview.getVisibility() == View.VISIBLE) {
+                    View bar = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+                    Object position = seekPreview.getTag();
+                    if (bar != null && position instanceof Long value) showSeekPreview(bar, value);
+                  }
+                });
+          } catch (Exception e) {
+            // No thumbnails: the time alone is still shown while scrubbing.
+          }
+        });
+  }
+
+  private void showSeekPreview(View bar, long requested) {
+    if (seekPreview == null || player == null) return;
+    long duration = Math.max(0, playingDuration());
+    long floor = Math.max(0, sectionFloor);
+    long ceiling = sectionEnd > 0 ? sectionEnd : duration;
+    long position = Math.max(floor, Math.min(requested, Math.max(floor, ceiling)));
+    seekPreview.setTag(position);
+    String label = clockTime(position);
+    seekPreviewTime.setText(label);
+    String spoken = "Seek preview, " + label;
+    if (seekIndex != null) {
+      int frame = seekIndex.frameAt(position);
+      if (frame != seekPreviewFrame) {
+        Bitmap image =
+            BitmapFactory.decodeByteArray(
+                seekIndex.data(), seekIndex.frameOffset(frame), seekIndex.frameLength(frame));
+        seekPreviewImage.setImageBitmap(image);
+        seekPreviewFrame = frame;
+      }
+      spoken += ", frame " + (frame + 1) + " of " + seekIndex.frameCount();
+    }
+    seekPreview.setContentDescription(spoken);
+    seekPreview.setVisibility(View.VISIBLE);
+    View root = (View) seekPreview.getParent();
+    seekPreview.measure(
+        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED),
+        View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+    int width = seekPreview.getMeasuredWidth(), height = seekPreview.getMeasuredHeight();
+    int[] barAt = new int[2], rootAt = new int[2];
+    bar.getLocationInWindow(barAt);
+    root.getLocationInWindow(rootAt);
+    float fraction = duration <= 0 ? 0 : position / (float) duration;
+    float center = barAt[0] - rootAt[0] + fraction * bar.getWidth();
+    int margin = dp(24);
+    // Clamped so the box never leaves the screen at either end of the bar.
+    float x = Math.max(margin, Math.min(center - width / 2f, root.getWidth() - width - margin));
+    float y = Math.max(margin, barAt[1] - rootAt[1] - height - dp(18));
+    seekPreview.setTranslationX(x);
+    seekPreview.setTranslationY(y);
+  }
+
+  private static String clockTime(long milliseconds) {
+    long seconds = Math.max(0, milliseconds / 1000);
+    long hours = seconds / 3600, minutes = seconds / 60 % 60, rest = seconds % 60;
+    return hours > 0
+        ? String.format(Locale.ROOT, "%d:%02d:%02d", hours, minutes, rest)
+        : String.format(Locale.ROOT, "%d:%02d", minutes, rest);
   }
 
   /**
@@ -2627,9 +3077,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void loadCastPhoto(ImageView face, String thumb, String name) {
+    loadCastPhoto(face, thumb, name, playingOrigin, playingToken);
+  }
+
+  private void loadCastPhoto(
+      ImageView face, String thumb, String name, String origin, String secret) {
     boolean isExternal = TitleCast.isExternalPhoto(thumb);
     if (!isExternal && !(thumb.startsWith("/") && !thumb.startsWith("//"))) return;
-    String origin = playingOrigin, secret = playingToken;
     int request = generation;
     network.execute(
         () -> {
@@ -3049,6 +3503,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void releasePlayer() {
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     skipButton = null;
+    seekPreview = null;
+    seekIndex = null;
     if (player != null) {
       if (!advancing) reportPlayback("stopped");
       if (mediaSession != null) {
