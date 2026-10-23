@@ -1,10 +1,14 @@
 # Test environment
 
-The prototype is tested without waking or modifying a household TV. The build image and
-emulator run as disposable Docker jobs on a Linux host with usable KVM. No ADB, emulator
+The prototype is tested without waking or modifying a household TV. The build image runs as
+a disposable Docker job, and the emulator checks run in the shared
+[QueuePilot Test environment](../test-environment/README.md) on a Linux host with usable KVM. No ADB, emulator
 console, or fixture port is published to the host network. Persistent cache holds the SDK
 work, debug signing key, AVD, and generated synthetic fixtures; it is machine-local,
 ignored, and never added to Git.
+
+The rest of this section describes `tools/emulator.sh`, which is now used only for the 4K
+experiment below; QueuePilot Test boots its own persistent AVD.
 
 The Android TV API 30 image needs explicit TV hardware dimensions. `emulator.sh` writes
 1920 × 1080 and landscape orientation before boot, starts the ADB server first, and resets
@@ -35,34 +39,24 @@ at most two Gradle workers. It uses no library media or photographs.
 The fixture server returns Plex-shaped XML, scoped invented tokens, byte-range video
 responses, and a QueuePilot-shaped registry. Its request history deliberately omits tokens.
 
-Start an emulator container with the following mounts and settings:
-
-- `--device /dev/kvm`, six CPUs, and a 10 GiB memory limit. The software renderer exceeded a 6 GiB
-  container limit during repeated playback tests; guest RAM alone is not the process budget.
-- The checkout at `/source` and persistent toolchain cache at `/cache`.
-- The emulator cache's own `android` directory at `/root/.android` (separate from the build signing cache).
-- Generated fixture files at `/fixtures`.
-- The image command `/source/tools/emulator.sh` and no published ports.
-
-After the emulator finishes booting and installs the APK, run the fixture server in that
-same container, then build the emulator-only hierarchy inspector and run the checks:
+Run the emulator checks in QueuePilot Test, from the Docker host that runs it. Build the APK
+in the checkout first:
 
 ```sh
-docker exec -d queuepilot-player-emulator python3 /source/tools/fixture_server.py
-docker exec queuepilot-player-emulator bash /source/tools/ui-inspector/build.sh /fixtures/inspector-build
-docker exec queuepilot-player-emulator adb -s emulator-5554 install -r /fixtures/inspector-build/inspector.apk
-docker exec queuepilot-player-emulator python3 -u /source/tools/smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/native_smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/panels_smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/markers_smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/labels_smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/display_smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/display_smoke.py --density-320
-docker exec queuepilot-player-emulator python3 -u /source/tools/rail_smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/rail_smoke.py --density-320
-docker exec queuepilot-player-emulator python3 -u /source/tools/details_smoke.py
-docker exec queuepilot-player-emulator python3 -u /source/tools/layout_smoke.py
+./tools/tv-lab.sh test                      # the canonical checkout, mounted at /source
+./tools/tv-lab.sh test my-branch            # the worktree /source/.worktrees/my-branch
 ```
+
+`tools/tv-lab.sh test` calls `queuepilot-test run` with `tools/tv-checks.sh` from the same
+checkout. The environment takes its lock, so a second run waits instead of overlapping. It
+saves an emulator snapshot of the person's session, shows the test banner on the page, and
+blocks the browser remote. It then installs the checkout's debug APK, starts
+`tools/fixture_server.py` with `FIXTURE_ROOT`, and runs the checks: the emulator-only hierarchy
+inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
+`markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
+`rail_smoke.py` (240 and 320), `details_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
+APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
+`QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
 The guest reaches the container's fixture server through the emulator's standard
 `10.0.2.2` host alias. The source contains only that standard alias and invented data.
@@ -78,18 +72,20 @@ own four-window-plus-4K checks in the private project notes.
 
 The layout check captures the emulator’s physical display, verifies PNG dimensions, and
 checks remote focus and artwork browsing. Run it after the functional smoke test, never
-concurrently. For a separate 4K run, restart the disposable container with
-`-e TV_WIDTH=3840 -e TV_HEIGHT=2160 -e TV_DENSITY=480` and a 16 GiB memory limit,
-then run `tools/layout_smoke.py` again. This experiment currently fails the strict
+concurrently. A 4K run cannot use the shared environment. Start a separate disposable
+container from `queuepilot-player-build:0.1` with `--device /dev/kvm`, six CPUs, a 16 GiB
+memory limit, no published ports, the checkout at `/source` (read-only), a toolchain cache at
+`/cache`, that cache's own `android` directory at `/root/.android`, the fixtures at `/fixtures`,
+`-e TV_WIDTH=3840 -e TV_HEIGHT=2160 -e TV_DENSITY=480`, and the command
+`bash -c 'python3 /source/tools/fixture_server.py & exec bash /source/tools/emulator.sh'`.
+Then run `tools/layout_smoke.py` in it, and remove the container afterward. This experiment currently fails the strict
 resolution assertion: the API 30 TV window surface remains 1080p despite reporting the
 4K physical mode. It is an unresolved experiment, not a passing release check. Merely
 changing `wm size` is also insufficient. The default boot is 1080p.
 
-`tools/layout_smoke.py --density-320` checks 1080p at density 320 as a separate TV scale;
-it changes only the disposable emulator. Default 1080p uses density 240.
+`tools/layout_smoke.py --density-320` checks 1080p at density 320 as a separate TV scale.
+Default 1080p uses density 240. The environment's restore resets the density afterward.
 
-Stop the disposable container when testing ends. Recreate it from the canonical checkout
-for another run; do not keep a running process bound to a worktree that will be removed.
 Hardware-specific HDR, passthrough, rendering buffers, large styled subtitles, real Plex
 Home enrollment, and Roku require separate device evidence.
 
@@ -139,25 +135,19 @@ python3 tools/lucide/generate.py # writes res/drawable/lucide_*.xml
 `tools/lucide/LICENSE` carries the Lucide ISC license and the MIT license of the Feather icons
 it derives from. Do not hand-edit a generated drawable.
 
-## Repeatable Docker lab
+## Shared test environment
 
-`tools/tv-lab.sh` manages the named `queuepilot-tv-lab` container. Build the APK and generate
-fixtures above, then start it with absolute paths:
+`tools/tv-lab.sh` no longer creates a container of its own. It drives the QueuePilot Test
+environment that people also use from a browser:
 
 ```sh
-./tools/tv-lab.sh start /absolute/path/to/queuepilot-player /absolute/path/to/emulator-cache /absolute/path/to/fixtures
 ./tools/tv-lab.sh status
-./tools/tv-lab.sh test
+./tools/tv-lab.sh start
+./tools/tv-lab.sh test [<checkout or worktree name>] [<label>]
 ./tools/tv-lab.sh stop
 ```
 
-The launcher runs the fixture service beside the headless Google Android TV emulator,
-mounts source read-only, gives the emulator its own Android home, and publishes no ports.
-It does not use the build signing cache or a household ADB connection. Wait for status to
-report `boot_completed=1` before testing. Start a fresh lab for each full run: one pass of the
-whole suite takes the emulator to about 8 GiB of the container's 10 GiB, and a second pass
-in the same session was killed by the memory limit on 2026-10-23. The test command runs the guarded sign-in,
-native playback and two-scale layout checks. Stop leaves the container configured for the
-next session; each emulator start wipes only its disposable guest. `remove` deletes only
-a container carrying the expected lab ownership label. Remove it before switching to
-another checkout, and before removing a source worktree.
+`start` and `stop` act on the shared emulator, so only stop it when nobody is using the page;
+it stops by itself after the idle period. To let a person try a branch build by hand, use
+`queuepilot-test install` inside the environment, described in its
+[README](../test-environment/README.md#branch-builds-for-people).

@@ -132,8 +132,8 @@ The disposable emulator fixture checks code authorization, cancellation, expiry,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
 See [test environment](docs/testing.md) and [verification](docs/verification-0.5.3.md).
-The repeatable `tools/tv-lab.sh` launcher keeps a named headless Docker lab available
-without involving a household TV; start/status/test/stop commands are documented there.
+The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
+without involving a household TV; `tools/tv-lab.sh test` runs them there.
 
 ## Foundation
 
