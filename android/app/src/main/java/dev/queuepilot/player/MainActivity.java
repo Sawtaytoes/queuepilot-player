@@ -110,8 +110,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private int displayPercent() {
-    return DisplaySize.valid(
-        prefs().getInt(DisplaySize.PREFERENCE_KEY, DisplaySize.DEFAULT_PERCENT));
+    return DisplaySize.percent(prefs());
   }
 
   /** Columns for a grid that has {@code baseline} columns at 100%. */
@@ -314,7 +313,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     railSelected = null;
     isRailExpanded = false;
     rail.setPadding(dp(12), dp(28), dp(12), dp(22));
-    rail.setBackgroundColor(0xff14171f);
+    rail.setBackgroundColor(TvTheme.SURFACE_BASE);
     rail.setTag("rail");
     rail.setContentDescription("Navigation, collapsed");
     // Seven entries and the avatar are taller than a 1080p screen at density 320 and the largest
@@ -410,26 +409,25 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout entry = ui.row();
     entry.setGravity(Gravity.CENTER_VERTICAL);
     entry.setPadding(dp(15), 0, dp(12), 0);
-    int color = isSelected ? TvUi.ACCENT : TvUi.MUTED;
+    int color = isSelected ? TvTheme.CONTENT_PRIMARY : TvTheme.CONTENT_MUTED;
     ImageView glyph = ui.icon(icon, color, 22);
     entry.addView(glyph);
     TextView text = ui.text(label, 16, color);
-    text.setTypeface(
-        android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+    text.setTypeface(ui.medium());
     text.setPadding(dp(14), 0, 0, 0);
     text.setSingleLine(true);
     text.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     entry.addView(text);
     railLabels.add(text);
     entry.setContentDescription(label);
-    int fill = isSelected ? 0xff293122 : Color.TRANSPARENT;
+    int fill = isSelected ? TvTheme.NEUTRAL_SURFACE : Color.TRANSPARENT;
     ui.focusable(entry, action, fill, 8);
     // Focus fills the entry with the accent and draws the icon and label in the background
     // color: the "filled" state, using only existing colors.
     entry.setOnFocusChangeListener(
         (view, focused) -> {
-          view.setBackground(ui.shape(focused ? TvUi.ACCENT : fill, 0, 8));
-          int ink = focused ? TvUi.BG : color;
+          view.setBackground(ui.shape(focused ? TvTheme.ACCENT_SOLID : fill, 0, 8));
+          int ink = focused ? TvTheme.ACCENT_ON_SOLID : color;
           glyph.setImageTintList(android.content.res.ColorStateList.valueOf(ink));
           text.setTextColor(ink);
         });
@@ -467,6 +465,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     View target = (View) rail.getParent();
     int from = target.getWidth(), to = dp(isExpanded ? RAIL_EXPANDED : RAIL_COLLAPSED);
     if (isExpanded) for (View label : railLabels) label.setVisibility(View.VISIBLE);
+    // The open rail floats over the content: elevation.high, and the scrim on the content.
+    target.setOutlineProvider(android.view.ViewOutlineProvider.BOUNDS);
+    target.setElevation(isExpanded ? dp(TvTheme.RAIL_ELEVATION) : 0);
+    if (contentScroll != null)
+      contentScroll.setForeground(
+          isExpanded ? new android.graphics.drawable.ColorDrawable(TvTheme.SCRIM) : null);
     railAnimation = android.animation.ValueAnimator.ofInt(from, to);
     railAnimation.setDuration(RAIL_MILLIS);
     railAnimation.addUpdateListener(
@@ -562,7 +566,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     frame.setBackgroundColor(TvUi.BG);
     content = ui.column();
     content.setPadding(dp(38), dp(32), dp(38), dp(32));
-    content.setBackground(ui.shape(0xff19202a, 0, 16));
+    content.setBackground(ui.shape(TvTheme.SURFACE_RAISED, 0, 16));
     FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(dp(630), -2, Gravity.CENTER);
     frame.addView(content, lp);
     setContentView(frame);
@@ -985,7 +989,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     int episode = item.isNull("episode") ? 0 : item.optInt("episode", 0);
     LinearLayout hero = ui.column();
     hero.setPadding(dp(24), dp(20), dp(24), dp(20));
-    hero.setBackground(ui.shape(0xff1d2a17, 0, 12));
+    hero.setBackground(ui.shape(TvTheme.ACCENT_SURFACE, 0, 12));
     hero.addView(ui.text(queue.optString("title", "QueuePilot queue"), 13, TvUi.ACCENT));
     ui.gap(hero, 12);
     hero.addView(ui.title(EpisodeLabel.primary(type, title, show), 29));
@@ -1021,7 +1025,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void demoHero() {
     StoryOrder.Item next = demo.next(completed());
     FrameLayout hero = new FrameLayout(this);
-    hero.setBackground(ui.shape(0xff102430, 0, 14));
+    hero.setBackground(ui.shape(TvTheme.SURFACE_RAISED, 0, 14));
     hero.setClipToOutline(true);
     FrameLayout.LayoutParams art = new FrameLayout.LayoutParams(dp(mainWidth / 2), -1, Gravity.END);
     hero.addView(ui.demoArt(0), art);
@@ -1078,7 +1082,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private View mediaHero(PlexCatalog.Entry entry) {
     LinearLayout hero = ui.row();
     hero.setPadding(dp(24), dp(20), dp(24), dp(20));
-    hero.setBackground(ui.shape(0xff102430, 0, 12));
+    hero.setBackground(ui.shape(TvTheme.SURFACE_RAISED, 0, 12));
     LinearLayout labels = ui.column();
     // The media server's own on-deck item: name that source, never imply it is a queue's next
     // item, and name the server rather than the provider.
@@ -1975,8 +1979,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       TextView view = new TextView(this);
       view.setText(letter.title());
       view.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, cell * .56f);
-      view.setTypeface(
-          android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+      view.setTypeface(ui.medium());
       view.setTextColor(TvUi.MUTED);
       view.setGravity(Gravity.CENTER);
       view.setIncludeFontPadding(false);
@@ -2558,12 +2561,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     current = new Screen("player");
     getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     FrameLayout root = new FrameLayout(this);
-    root.setBackgroundColor(Color.BLACK);
+    root.setBackgroundColor(TvTheme.VIDEO_BACKDROP);
     playerView = new PlayerView(this);
     root.addView(playerView, new FrameLayout.LayoutParams(-1, -1));
     LinearLayout overlay = ui.column();
     overlay.setPadding(dp(26), dp(18), dp(26), dp(16));
-    overlay.setBackgroundColor(0xd0101218);
+    overlay.setBackgroundColor(TvTheme.PLAYER_BAR);
     TextView playingTitle = ui.title(playingEntry == null ? title : playingEntry.primary(), 23);
     playingTitle.setTag("playing-title");
     overlay.addView(playingTitle);
@@ -3722,7 +3725,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private View lineupDivider(JSONObject full, long lineupMs) {
     LinearLayout box = ui.column();
     box.setPadding(dp(20), dp(16), dp(20), dp(16));
-    box.setBackground(ui.shape(0xff1d2a17, TvUi.ACCENT, 9));
+    box.setBackground(ui.shape(TvTheme.ACCENT_SURFACE, TvTheme.ACCENT_BORDER, 9));
     TextView title = ui.title("Tonight's lineup ends here", 17);
     title.setTextColor(TvUi.ACCENT);
     box.addView(title);
@@ -3770,9 +3773,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     else if (item.optBoolean("isSpecial")) icon = R.drawable.lucide_sparkles;
     TextView badge =
         ui.text(
-            label, 13, isNext ? Color.rgb(24, 32, 14) : isWatched ? TvUi.MUTED : TvUi.WHITE);
+            label, 13, isNext ? TvTheme.ACCENT_ON_SOLID : isWatched ? TvUi.MUTED : TvUi.WHITE);
     badge.setPadding(dp(10), dp(6), dp(10), dp(6));
-    badge.setBackground(ui.shape(isNext ? TvUi.ACCENT : 0xff191f28, 0, 7));
+    badge.setBackground(ui.shape(isNext ? TvTheme.ACCENT_SOLID : TvTheme.NEUTRAL_SURFACE, 0, 7));
     badge.setSingleLine(true);
     if (icon != 0) ui.withIcon(badge, icon);
     badge.setTag("queue-state");
@@ -3781,7 +3784,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private View progressBar(float fraction) {
     LinearLayout track = ui.row();
-    track.setBackground(ui.shape(0xff343b48, 0, 2));
+    track.setBackground(ui.shape(TvTheme.BORDER_DEFAULT, 0, 2));
     View fill = new View(this);
     fill.setBackground(ui.shape(TvUi.ACCENT, 0, 2));
     track.addView(fill, new LinearLayout.LayoutParams(0, -1, fraction));
@@ -3802,7 +3805,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     row.addView(number, new LinearLayout.LayoutParams(dp(40), -2));
     ImageView image = new ImageView(this);
     image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-    image.setBackgroundColor(0xff191f28);
+    image.setBackgroundColor(TvTheme.SURFACE_SUNKEN);
     LinearLayout.LayoutParams imageLayout = new LinearLayout.LayoutParams(dp(112), dp(63));
     imageLayout.rightMargin = dp(16);
     row.addView(image, imageLayout);
@@ -3832,7 +3835,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       image.setAlpha(.5f);
       labels.setAlpha(.6f);
     }
-    ui.focusable(row, open, isNext ? 0xff1d2a17 : TvUi.PANEL);
+    ui.focusable(row, open, isNext ? TvTheme.ACCENT_SURFACE : TvUi.PANEL);
     row.setContentDescription(itemDescription(item));
     row.setTag("queue-item");
     return row;
@@ -3852,7 +3855,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     loadQueueArt(image, item, 720);
     TextView number = ui.text(String.valueOf(item.optInt("position") + 1), 12, TvUi.WHITE);
     number.setPadding(dp(7), dp(4), dp(7), dp(4));
-    number.setBackground(ui.shape(0xcc101218, 0, 5));
+    number.setBackground(ui.shape(TvTheme.ART_LABEL, 0, 5));
     FrameLayout.LayoutParams numberLayout =
         new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.START);
     numberLayout.setMargins(dp(8), dp(8), 0, 0);
@@ -4206,7 +4209,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       if (!isHome || !ratingKey.matches("\\d+") || !pictured.add(ratingKey)) continue;
       ImageView image = new ImageView(this);
       image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-      image.setBackgroundColor(0xff191f28);
+      image.setBackgroundColor(TvTheme.SURFACE_SUNKEN);
       LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(112), dp(63));
       lp.rightMargin = dp(6);
       pictures.addView(image, lp);
@@ -4390,7 +4393,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     preferences.addView(rewindButton);
     TextView sizeButton =
         ui.button(
-            "Display size · " + DisplaySize.label(displayPercent()),
+            "Display size · " + DisplaySize.label(prefs()),
             R.drawable.lucide_scaling,
             this::displaySizeSetting,
             false);
@@ -4567,28 +4570,162 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
   }
 
+  /**
+   * Display size: Auto, computed from the screen and the viewing distance entered above it, or a
+   * manual size from 50% to 125%.
+   */
   private void displaySizeSetting() {
-    String[] choices = new String[DisplaySize.CHOICES.length];
-    for (int i = 0; i < choices.length; i++) choices[i] = DisplaySize.label(DisplaySize.CHOICES[i]);
-    TvPanel dialog =
+    float inches = prefs().getFloat(DisplaySize.SCREEN_KEY, DisplaySize.DEFAULT_SCREEN_INCHES);
+    float feet = prefs().getFloat(DisplaySize.DISTANCE_KEY, DisplaySize.DEFAULT_DISTANCE_FEET);
+    int stored =
+        DisplaySize.valid(prefs().getInt(DisplaySize.PREFERENCE_KEY, DisplaySize.DEFAULT_PERCENT));
+    String[] choices = new String[DisplaySize.CHOICES.length + 1];
+    choices[0] = DisplaySize.label(DisplaySize.AUTO, inches, feet);
+    for (int i = 0; i < DisplaySize.CHOICES.length; i++)
+      choices[i + 1] = DisplaySize.label(DisplaySize.CHOICES[i], inches, feet);
+    TvPanel[] holder = new TvPanel[1];
+    LinearLayout measures = ui.column();
+    TextView screen =
+        ui.button(
+            "Screen · " + DisplaySize.screenLabel(inches),
+            R.drawable.lucide_tv,
+            () -> {
+              holder[0].dismiss();
+              displayMeasureSetting(true);
+            },
+            false);
+    screen.setContentDescription("Screen size, " + DisplaySize.screenLabel(inches));
+    screen.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+    measures.addView(screen, new LinearLayout.LayoutParams(-1, -2));
+    ui.gap(measures, 8);
+    TextView distance =
+        ui.button(
+            "Distance · " + DisplaySize.distanceLabel(feet),
+            R.drawable.lucide_ruler,
+            () -> {
+              holder[0].dismiss();
+              displayMeasureSetting(false);
+            },
+            false);
+    distance.setContentDescription("Viewing distance, " + DisplaySize.distanceLabel(feet));
+    distance.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
+    measures.addView(distance, new LinearLayout.LayoutParams(-1, -2));
+    ui.gap(measures, 12);
+    holder[0] =
         panel()
             .setTitle("Display size")
             .setMessage(
                 "Make everything smaller to fit more on screen, or larger to read it from"
-                    + " farther away.")
-            .setSelected(java.util.Arrays.binarySearch(DisplaySize.CHOICES, displayPercent()))
+                    + " farther away. Auto sets the size from your screen and how far away you"
+                    + " sit.")
+            .setView(measures)
+            .setSelected(
+                stored == DisplaySize.AUTO
+                    ? 0
+                    : 1 + java.util.Arrays.binarySearch(DisplaySize.CHOICES, stored))
             .setItems(
                 choices,
                 (d, i) -> {
-                  prefs().edit().putInt(DisplaySize.PREFERENCE_KEY, DisplaySize.CHOICES[i]).apply();
-                  // Applies at once: every later view, panel, and grid reads the new size.
-                  ui = new TvUi(this);
-                  getWindow().getDecorView().post(() -> render(current));
+                  prefs()
+                      .edit()
+                      .putInt(
+                          DisplaySize.PREFERENCE_KEY,
+                          i == 0 ? DisplaySize.AUTO : DisplaySize.CHOICES[i - 1])
+                      .apply();
+                  applyDisplaySize(false);
                 })
             .setNegativeButton("Cancel", null)
             .create();
-    dialog.show();
-    dialog.setPanelSize(dp(330), -2);
+    holder[0].show();
+    holder[0].setPanelSize(dp(330), -2);
+  }
+
+  /** Applies at once: every later view, panel, and grid reads the new size. */
+  private void applyDisplaySize(boolean isReopened) {
+    ui = new TvUi(this);
+    getWindow()
+        .getDecorView()
+        .post(
+            () -> {
+              render(current);
+              if (isReopened) displaySizeSetting();
+            });
+  }
+
+  /** Enters the screen's diagonal in inches, or the viewing distance in feet, for Auto. */
+  private void displayMeasureSetting(boolean isScreen) {
+    String key = isScreen ? DisplaySize.SCREEN_KEY : DisplaySize.DISTANCE_KEY;
+    float minimum =
+        isScreen ? DisplaySize.MINIMUM_SCREEN_INCHES : DisplaySize.MINIMUM_DISTANCE_FEET;
+    float maximum =
+        isScreen ? DisplaySize.MAXIMUM_SCREEN_INCHES : DisplaySize.MAXIMUM_DISTANCE_FEET;
+    float value =
+        isScreen
+            ? DisplaySize.screenInches(prefs().getFloat(key, DisplaySize.DEFAULT_SCREEN_INCHES))
+            : DisplaySize.distanceFeet(prefs().getFloat(key, DisplaySize.DEFAULT_DISTANCE_FEET));
+    String unit = isScreen ? "inches" : "feet";
+    LinearLayout form = ui.column();
+    form.setPadding(dp(4), dp(4), dp(4), dp(8));
+    EditText input = new EditText(this);
+    input.setSingleLine();
+    input.setTag("display-measure");
+    input.setInputType(
+        InputType.TYPE_CLASS_NUMBER | (isScreen ? 0 : InputType.TYPE_NUMBER_FLAG_DECIMAL));
+    input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
+    input.setText(DisplaySize.number(value));
+    input.setSelectAllOnFocus(true);
+    input.setTypeface(TvTheme.regular(this));
+    input.setTextColor(TvUi.WHITE);
+    input.setContentDescription(isScreen ? "Screen size in inches" : "Viewing distance in feet");
+    form.addView(input, new LinearLayout.LayoutParams(-1, dp(54)));
+    TvPanel d =
+        panel()
+            .setTitle(isScreen ? "Screen size" : "Viewing distance")
+            .setMessage(
+                isScreen
+                    ? "The screen's diagonal, in inches."
+                    : "How far you sit from the screen, in feet.")
+            .setView(form)
+            .setPositiveButton("Save", null)
+            .setNegativeButton("Cancel", null)
+            .create();
+    boolean[] isSaved = {false};
+    Runnable save =
+        () -> {
+          if (isSaved[0]) return;
+          float entered;
+          try {
+            entered = Float.parseFloat(input.getText().toString().trim());
+          } catch (NumberFormatException e) {
+            entered = Float.NaN;
+          }
+          if (!(entered >= minimum && entered <= maximum)) {
+            input.setError(
+                "Enter "
+                    + DisplaySize.number(minimum)
+                    + " to "
+                    + DisplaySize.number(maximum)
+                    + " "
+                    + unit);
+            return;
+          }
+          isSaved[0] = true;
+          prefs().edit().putFloat(key, entered).apply();
+          d.dismiss();
+          applyDisplaySize(true);
+        };
+    input.setOnEditorActionListener(
+        (v, action, event) -> {
+          save.run();
+          return true;
+        });
+    d.setOnShowListener(
+        v -> {
+          d.setPanelSize(dp(360), -2);
+          d.getButton(TvPanel.BUTTON_POSITIVE).setOnClickListener(b -> save.run());
+          input.requestFocus();
+        });
+    d.show();
   }
 
   /** The installed version, so Settings never shows a stale hand-written number. */
@@ -4850,8 +4987,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       android.graphics.drawable.StateListDrawable states =
           new android.graphics.drawable.StateListDrawable();
       states.addState(
-          new int[] {android.R.attr.state_focused}, ui.shape(0x66202630, TvUi.ACCENT, 50));
-      states.addState(new int[] {android.R.attr.state_pressed}, ui.shape(0x88202630, 0, 50));
+          new int[] {android.R.attr.state_focused}, ui.shape(TvTheme.CONTROL_FOCUSED, TvTheme.FOCUS_RING, 50));
+      states.addState(
+          new int[] {android.R.attr.state_pressed}, ui.shape(TvTheme.CONTROL_PRESSED, 0, 50));
       states.addState(new int[] {}, ui.shape(Color.TRANSPARENT, 0, 50));
       if (view.getId() == androidx.media3.ui.R.id.exo_rew_with_amount
           || view.getId() == androidx.media3.ui.R.id.exo_ffwd_with_amount) {
@@ -5332,7 +5470,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
             | android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
             | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
-    field.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18 * TvUi.TYPE_BASE * ui.scale);
+    field.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, TvUi.typeSize(18) * ui.scale);
     field.setTextColor(TvUi.WHITE);
     field.setHintTextColor(TvUi.MUTED);
     field.setHint("Search titles");

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Outfit, Charcuterie's font.sans (SIL OFL 1.1; see tools/fonts/OFL.txt). One variable font
+     file, named at the weights the interface uses. -->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android">
+  <font android:font="@font/outfit_variable" android:fontStyle="normal" android:fontWeight="400"
+      android:fontVariationSettings="'wght' 400" />
+  <font android:font="@font/outfit_variable" android:fontStyle="normal" android:fontWeight="500"
+      android:fontVariationSettings="'wght' 500" />
+  <font android:font="@font/outfit_variable" android:fontStyle="normal" android:fontWeight="600"
+      android:fontVariationSettings="'wght' 600" />
+</font-family>

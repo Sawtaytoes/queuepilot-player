@@ -39,6 +39,7 @@ pause
 play
 rotate-ccw
 rotate-cw
+ruler
 scaling
 search
 settings

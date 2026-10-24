@@ -60,8 +60,12 @@ every try waits 60 seconds. A correct PIN keeps locked queues open until the app
 foreground. QueuePilot enforces the lock (`423` until `POST /api/native/unlock`), not only the
 TV, and with no PIN set nothing is locked.
 
-**Display size** in Settings scales the whole interface to 70, 80, 90, 100, 110 or 125
-percent, and applies at once. Grids gain columns at smaller sizes. The Media3 control groups
+**Display size** in Settings scales the whole interface and applies at once. **Auto**, the
+default, sets the size from the screen's diagonal and the viewing distance, both entered in
+the same panel (55 in and 9 ft until changed): the size is the square root of the ratio
+between a 55 in screen's viewing angle at 10 ft (22.6°) and this screen's, rounded to 5% and
+kept within 50% to 125%. A 97 in screen at 6.5 ft is **Auto · 65%**. A manual size from 50% to
+125% in 5% steps overrides it. Grids gain columns at smaller sizes. The Media3 control groups
 are scaled about their anchored edge. The title screen keeps a long title to two lines and a
 summary to four, with **More** for the full text.
 
@@ -86,6 +90,12 @@ A title screen shows what Plex sends about the title: year, content rating, leng
 and episode counts, studio, genres, critic and audience scores, time left or episodes
 watched, director and writers, and a cast row with portraits. A show's season list and a
 season's episode list start with the same facts for that show or season.
+
+**Look.** The colors, radii, and type are the QueuePilot web app's: Charcuterie's `daylight`
+variant in the dark scheme, with Charcuterie's categorical Lime as the accent and a 3 dp lime
+focus ring. Every color is a named token in `TvTheme.java`, the only file allowed to hold a
+color literal (`tools/theme_check.py`). The typeface is Charcuterie's Outfit, bundled from
+`google/fonts` under the SIL Open Font License (`tools/fonts/OFL.txt`, `tools/fonts/fetch.sh`).
 
 Icons are [Lucide](https://lucide.dev) icons, vendored as Android vector drawables from
 the pinned `lucide-static` release under its ISC license (`tools/lucide/LICENSE`). They mark

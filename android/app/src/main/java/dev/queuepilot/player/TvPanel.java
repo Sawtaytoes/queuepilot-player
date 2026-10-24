@@ -43,7 +43,9 @@ final class TvPanel extends Dialog {
     scroll = new ScrollView(owner);
     scroll.setFillViewport(false);
     scroll.setClipToOutline(true);
-    scroll.setBackground(ui.shape(TvUi.BG, 0xff343b48, 16));
+    // Charcuterie Dialog: surface.overlay with a border.default edge, one pixel wide.
+    scroll.setBackground(
+        ui.outlined(TvTheme.SURFACE_OVERLAY, TvTheme.BORDER_DEFAULT, TvTheme.RADIUS_XL));
     body = ui.column();
     body.setPadding(ui.dp(22), ui.dp(22), ui.dp(22), ui.dp(18));
     scroll.addView(body);
@@ -83,7 +85,7 @@ final class TvPanel extends Dialog {
               dismiss();
               b.itemClick.onClick(this, index);
             },
-            i == b.selected ? 0xff293425 : TvUi.PANEL);
+            i == b.selected ? TvTheme.ACCENT_SURFACE : TvUi.PANEL);
         row.setContentDescription(b.items[i]);
         body.addView(row, new LinearLayout.LayoutParams(-1, -2));
         ui.gap(body, 6);

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The two theme colors the window needs before any Java runs: the launch background and the
+     platform accent (text cursors and selection handles). They copy TvTheme.SURFACE_BASE and
+     TvTheme.ACCENT_CONTENT, which name their Charcuterie tokens; tools/theme_check.py keeps
+     them equal. -->
+<resources>
+  <color name="surface_base">#131822</color>
+  <color name="accent_content">#A3CF68</color>
+</resources>

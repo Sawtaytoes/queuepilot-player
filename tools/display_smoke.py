@@ -8,7 +8,7 @@ import smoke as s
 import re,struct,sys,time,urllib.request,zlib
 import xml.etree.ElementTree as ET
 
-ACCENT=(207,237,170)
+ACCENT=(163,207,104) # TvTheme.FOCUS_RING, categorical.4.content
 assert s.adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
 is_shield='--density-320' in sys.argv
 s.adb('shell','wm','size','1920x1080' if is_shield else 'reset');s.adb('shell','wm','density','320' if is_shield else 'reset')
@@ -88,7 +88,8 @@ if s.has_desc('Switch profile, Morgan'):s.click('Switch profile, Morgan');s.clic
 if 'name="display-size"' in s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/state.xml').decode():
     set_size(100) # an interrupted earlier run left a size behind
 else:
-    s.click('Settings');wait(lambda:by_text('Display size · 100%'),'the default Display size of 100%')
+    # Auto is the default; 55 in at 9 ft computes 95%.
+    s.click('Settings');wait(lambda:by_text('Display size · Auto · 95%'),'the default Display size, Auto at 95%')
 
 columns={}
 for percent in (100,70,125):
