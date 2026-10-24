@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Home shows live queues after a cold start, and saved queues never stay; emulator only.
 
-Run last: after household_smoke.py the fixture QueuePilot is connected and its queues are saved
-on the TV. It runs after library_smoke.py, the heaviest check, because the shared emulator's memory
-grows through a run. It resets the density that layout_smoke.py --density-320 leaves set.
+Run right after household_smoke.py, which leaves the fixture QueuePilot connected and its queues
+saved on the TV. It cannot run after layout_smoke.py, which clears the app's data and opens the
+demo. It resets the display density first.
 
 The defect (0.5.4 to 0.5.7): Home asked QueuePilot for its queues once, when the app opened. At
 boot, or when a TV wakes, the app opens before Android has a default network (the shared

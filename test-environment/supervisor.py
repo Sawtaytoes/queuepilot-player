@@ -31,9 +31,14 @@ PORT = int(os.environ.get('QPT_PORT', '8080'))
 IDLE_SECONDS = int(float(os.environ.get('QPT_IDLE_MINUTES', '30')) * 60)
 IDLE_WARNING_SECONDS = min(300, IDLE_SECONDS // 3)
 BOOT_TIMEOUT_SECONDS = int(os.environ.get('QPT_BOOT_TIMEOUT', '600'))
+# After a snapshot load, ADB can keep the emulator `offline` until it reconnects.
+ADB_OFFLINE_GRACE_SECONDS = 5
 DISPLAY_SIZE = os.environ.get('QPT_DISPLAY_SIZE', '1920x1080')
 EMULATOR_MEMORY = os.environ.get('QPT_EMULATOR_MEMORY', '4096')
 EMULATOR_CORES = os.environ.get('QPT_EMULATOR_CORES', '4')
+# ANGLE on SwiftShader. `swiftshader_indirect` (discontinued in emulator 36.4.9, still
+# accepted) held about 1 GiB more host memory through the same checks and grew faster.
+EMULATOR_GPU = os.environ.get('QPT_EMULATOR_GPU', 'swangle')
 AUTHZ_URL = os.environ.get('QPT_AUTHZ_URL', '')
 PUBLIC_URL = os.environ.get('QPT_PUBLIC_URL', '').rstrip('/')
 VNC_PORT = 5900
@@ -215,7 +220,13 @@ class Environment:
                 self.set_phase('error', 'Start failed')
                 raise
 
-    async def _start(self):
+    async def _start(self, is_restoring=None):
+        """Start the display and the emulator.
+
+        `is_restoring` boots from the saved owner session. By default that happens when a
+        session file is left over and no test holds the lock; the end of a test whose
+        emulator exited asks for it explicitly, because the test still holds the lock.
+        """
         qptest.prepare_directories()
         self.set_phase('starting', 'Preparing the Android TV device')
         await self._ensure_avd()
@@ -238,11 +249,14 @@ class Environment:
             await asyncio.sleep(0.1)
         await qptest.run('adb', 'start-server', timeout=30)
         arguments = [
-            'emulator', '-avd', qptest.AVD_NAME, '-port', str(qptest.CONSOLE_PORT), '-gpu', 'swiftshader_indirect',
+            'emulator', '-avd', qptest.AVD_NAME, '-port', str(qptest.CONSOLE_PORT), '-gpu', EMULATOR_GPU,
             '-memory', EMULATOR_MEMORY, '-cores', EMULATOR_CORES, '-no-boot-anim', '-no-metrics', '-no-audio',
             '-skin', '1920x1080', '-fixed-scale']
         session = read_json(qptest.SESSION_PATH)
-        if session and not lock_is_held():
+        if is_restoring is None:
+            is_restoring = bool(session) and not lock_is_held()
+        is_restoring = is_restoring and bool(session)
+        if is_restoring:
             # A test ended without restoring the owner's session (for example, the
             # container restarted). Boot from the saved session instead.
             arguments += ['-snapshot', qptest.TEST_SNAPSHOT, '-no-snapshot-save']
@@ -252,24 +266,10 @@ class Environment:
             self.set_phase('starting', 'Starting Android')
         await self._spawn('emulator', arguments)
         deadline = time.monotonic() + BOOT_TIMEOUT_SECONDS
-        while True:
-            self._check_alive('emulator')
-            devices = await qptest.run('adb', 'devices', timeout=15, check=False)
-            if f'{qptest.SERIAL}\tdevice' in devices:
-                break
-            if time.monotonic() > deadline:
-                raise RuntimeError('the emulator did not attach to ADB')
-            await asyncio.sleep(1)
+        await self._wait_for_adb(deadline)
         self.set_phase('starting', 'Android is booting')
-        while True:
-            self._check_alive('emulator')
-            booted = await adb('shell', 'getprop', 'sys.boot_completed', timeout=15, check=False)
-            if booted.strip() == '1':
-                break
-            if time.monotonic() > deadline:
-                raise RuntimeError('Android did not finish booting')
-            await asyncio.sleep(2)
-        if session and not lock_is_held():
+        await self._wait_for_boot(deadline)
+        if is_restoring:
             await self._finish_restore()
         self.set_phase('starting', 'Installing QueuePilot')
         await self.ensure_app()
@@ -291,7 +291,7 @@ class Environment:
             'hw.lcd.width': '1920', 'hw.lcd.height': '1080', 'hw.lcd.density': '240',
             'hw.initialOrientation': 'landscape', 'skin.name': '1920x1080', 'skin.path': '1920x1080',
             'hw.keyboard': 'yes', 'hw.ramSize': EMULATOR_MEMORY, 'hw.cpu.ncore': EMULATOR_CORES,
-            'hw.gpu.enabled': 'yes', 'hw.gpu.mode': 'swiftshader_indirect', 'disk.dataPartition.size': '6G',
+            'hw.gpu.enabled': 'yes', 'hw.gpu.mode': EMULATOR_GPU, 'disk.dataPartition.size': '6G',
             'hw.audioInput': 'no',
         })
         config.write_text(''.join(f'{key}={value}\n' for key, value in values.items()))
@@ -305,6 +305,11 @@ class Environment:
 
     async def _spawn(self, name, command):
         environment = {**qptest.ENVIRONMENT, 'DISPLAY': DISPLAY}
+        if name == 'emulator':
+            # The emulator allocates with tcmalloc, which by default keeps freed memory.
+            # A snapshot load frees the renderer's state for the whole guest (over 1 GiB
+            # after a test); decommit returns it to the system instead of holding it.
+            environment.setdefault('TCMALLOC_AGGRESSIVE_DECOMMIT', 'true')
         log = open(qptest.LOGS / f'{name}.log', 'ab')
         log.write(f'\n--- {time.strftime("%Y-%m-%dT%H:%M:%S")} {" ".join(command)}\n'.encode())
         log.flush()
@@ -313,6 +318,45 @@ class Environment:
         log.close()
         self.processes[name] = process
         return process
+
+    async def _wait_for_adb(self, deadline):
+        """Wait until ADB lists the emulator as `device`.
+
+        After a snapshot load ADB can keep the emulator `offline` indefinitely; only
+        `adb reconnect offline` brings it back. Do that after a short grace period, and
+        again while it stays offline.
+        """
+        offline_since = None
+        while True:
+            self._check_alive('emulator')
+            devices = await qptest.run('adb', 'devices', timeout=15, check=False)
+            if f'{qptest.SERIAL}\tdevice' in devices:
+                return
+            if f'{qptest.SERIAL}\toffline' in devices:
+                offline_since = offline_since or time.monotonic()
+                if time.monotonic() - offline_since >= ADB_OFFLINE_GRACE_SECONDS:
+                    print('ADB reports the emulator offline; running adb reconnect offline', flush=True)
+                    await qptest.run('adb', 'reconnect', 'offline', timeout=15, check=False)
+                    offline_since = time.monotonic()
+            else:
+                offline_since = None
+            if time.monotonic() > deadline:
+                raise RuntimeError('the emulator did not attach to ADB')
+            await asyncio.sleep(1)
+
+    async def _wait_for_boot(self, deadline):
+        while True:
+            self._check_alive('emulator')
+            booted = await adb('shell', 'getprop', 'sys.boot_completed', timeout=15, check=False)
+            if booted.strip() == '1':
+                return
+            if time.monotonic() > deadline:
+                raise RuntimeError('Android did not finish booting')
+            await asyncio.sleep(2)
+
+    def _is_alive(self, name):
+        process = self.processes.get(name)
+        return process is not None and process.returncode is None
 
     def _check_alive(self, name):
         process = self.processes.get(name)
@@ -325,12 +369,16 @@ class Environment:
         if process is None:
             return
         await process.wait()
-        if self.state == 'running' and not self.lifecycle.locked():
-            async with self.lifecycle:
-                self.error = 'The emulator exited unexpectedly'
-                await self._teardown()
-                self._record_stop('emulator exited')
-                self.set_phase('stopped', 'Stopped')
+        # Wait for the lock instead of skipping when it is held: a test's end request
+        # can arrive while the emulator dies, and the state must not stay `running`.
+        async with self.lifecycle:
+            if self.processes.get('emulator') is not process or self.state != 'running':
+                return
+            print(f'the emulator exited unexpectedly ({process.returncode})', flush=True)
+            self.error = 'The emulator exited unexpectedly'
+            await self._teardown()
+            self._record_stop('emulator exited')
+            self.set_phase('stopped', 'Stopped')
 
     async def stop(self, reason):
         async with self.lifecycle:
@@ -441,14 +489,35 @@ class Environment:
             self.test['status'] = 'restoring'
         await self.broadcast()
         try:
-            if self.state == 'running':
-                began = time.monotonic()
-                await self.console.command(f'avd snapshot load {qptest.TEST_SNAPSHOT}', timeout=900)
-                print(f'restored the session in {time.monotonic() - began:.1f} s', flush=True)
-                self.remote.close()
-                await adb('wait-for-device', timeout=120)
-                await self._finish_restore()
-                await self.ensure_app()
+            is_restored = False
+            if self.state == 'running' and self._is_alive('emulator'):
+                try:
+                    await self._restore_in_place()
+                    is_restored = True
+                except Exception as error:  # noqa: BLE001 - recovered below when the emulator died
+                    if self._is_alive('emulator'):
+                        raise
+                    print(f'the emulator exited during the restore: {error}', flush=True)
+            if not is_restored and qptest.SESSION_PATH.exists():
+                # The emulator exited during the test (for example, the kernel's OOM
+                # killer). The saved snapshot is still on disk: boot from it.
+                await self._teardown()
+                if self.stop_after_test:
+                    # The next start boots from the saved session.
+                    self._record_stop('the emulator exited during an automated test')
+                    self.set_phase('stopped', 'Stopped')
+                else:
+                    self.error = None
+                    self.started_at = now()
+                    self.ready_at = None
+                    self.set_phase('starting', 'Restoring your session after the emulator exited')
+                    try:
+                        await self._start(is_restoring=True)
+                    except Exception as error:
+                        self.error = str(error)
+                        await self._teardown()
+                        self.set_phase('error', 'Restore failed')
+                        raise
         finally:
             self.test = None
             self.touch()
@@ -456,6 +525,17 @@ class Environment:
             if self.stop_after_test:
                 self.stop_after_test = False
                 asyncio.get_event_loop().create_task(self.stop('the automated test finished'))
+
+    async def _restore_in_place(self):
+        began = time.monotonic()
+        await self.console.command(f'avd snapshot load {qptest.TEST_SNAPSHOT}', timeout=900)
+        print(f'restored the session in {time.monotonic() - began:.1f} s', flush=True)
+        self.remote.close()
+        deadline = time.monotonic() + 120
+        await self._wait_for_adb(deadline)
+        await self._wait_for_boot(deadline)
+        await self._finish_restore()
+        await self.ensure_app()
 
     async def _finish_restore(self):
         with contextlib.suppress(Exception):
@@ -661,7 +741,11 @@ async def internal_begin(request):
 
 async def internal_end(request):
     async with environment.lifecycle:
-        await environment.end_test()
+        try:
+            await environment.end_test()
+        except Exception as error:  # noqa: BLE001 - reported to the command-line tool
+            print(f'restore failed: {error}', flush=True)
+            raise web.HTTPInternalServerError(text=f'The session restore failed: {error}') from error
     return web.json_response(environment.status())
 
 

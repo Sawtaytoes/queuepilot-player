@@ -20,9 +20,10 @@ python3 -u "$source_directory/tools/rail_smoke.py" --density-320
 python3 -u "$source_directory/tools/details_smoke.py"
 python3 -u "$source_directory/tools/queue_history_smoke.py"
 python3 -u "$source_directory/tools/household_smoke.py"
+# Right after household_smoke.py, which leaves the fixture QueuePilot connected. layout_smoke.py
+# clears the app's data and opens the demo, so this check cannot run after it.
+python3 -u "$source_directory/tools/cold_start_smoke.py"
 python3 -u "$source_directory/tools/restyle_smoke.py"
 python3 -u "$source_directory/tools/library_smoke.py"
 python3 -u "$source_directory/tools/layout_smoke.py"
 python3 -u "$source_directory/tools/layout_smoke.py" --density-320
-# Last: the emulator's memory grows through the run, and library_smoke.py is the heaviest check.
-python3 -u "$source_directory/tools/cold_start_smoke.py"

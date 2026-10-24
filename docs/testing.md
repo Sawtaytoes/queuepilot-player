@@ -55,8 +55,7 @@ blocks the browser remote. It then installs the checkout's debug APK, starts
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
 `rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `household_smoke.py`,
-`library_smoke.py`, and
-`layout_smoke.py` (240 and 320), and last `cold_start_smoke.py`. Whatever the result, the snapshot and the release
+`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
@@ -150,10 +149,11 @@ the fifth one's 60-second wait, and the right PIN playing the queue with Morgan'
 unlock header. Finally it leaves the app with Home and returns, and the PIN is asked again. `rail_smoke.py` counts
 History among the rail entries.
 
-`cold_start_smoke.py` runs last, after the heaviest check (`library_smoke.py`), because the
-shared emulator's memory grows through a run: two runs with it placed after the household check
-had the emulator killed by the container's 10 GiB memory limit during `library_smoke.py`. It
-resets the density, then force-stops the app and launches it: Home
+`cold_start_smoke.py` runs right after `household_smoke.py`, which leaves the fixture QueuePilot
+connected; it cannot run after `layout_smoke.py`, which clears the app's data and opens the demo.
+(For a day it ran last to stay under the emulator's memory limit, and in that place it could not
+pass; the test environment's [Memory](../test-environment/README.md#memory) section has the
+fix.) It resets the density, then force-stops the app and launches it: Home
 must show the live queues and never the heading "Saved queues · reconnect to start playback".
 Then it turns the emulator's Wi-Fi off before a cold start, which is the state at boot (the
 shared emulator's Wi-Fi connected 23 s after the app opened): Home shows the saved queues, the

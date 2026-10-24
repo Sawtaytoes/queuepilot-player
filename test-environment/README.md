@@ -81,6 +81,13 @@ If the test process dies, the kernel releases the lock and the supervisor restor
 session on its own. If the container stops during a test, the next start boots from the
 saved snapshot.
 
+If the emulator itself exits during a test (for example, the kernel's out-of-memory
+killer), the end of the run boots it again from the saved snapshot instead of failing,
+so the person's session comes back and the environment keeps running. A test that had to
+start the emulator leaves it stopped, and the next start restores the session. When ADB
+keeps a restored emulator `offline`, the supervisor runs `adb reconnect offline` until it
+reports `device`.
+
 ```sh
 queuepilot-test run --source /source/.worktrees/my-branch --label "my-branch smoke" -- \
   python3 -u /source/.worktrees/my-branch/tools/smoke.py
@@ -120,8 +127,8 @@ queuepilot-test idle 5    # change the idle stop until the container restarts
 | `/artifacts` (read-only) | Release APKs named `queuepilot-lab-<version>.apk`. |
 | `/source` (read-only) | The player checkout; worktrees appear beneath it. |
 
-Give the container `/dev/kvm`, six CPUs and a 10 GiB memory limit, the same as the
-emulator checks in [testing](../docs/testing.md). Publish only port 8080. ADB, the
+Give the container `/dev/kvm`, six CPUs and a 12 GiB memory limit (see [Memory](#memory)).
+ Publish only port 8080. ADB, the
 emulator console and VNC listen on loopback inside the container.
 
 | Variable | Default | Meaning |
@@ -130,6 +137,34 @@ emulator console and VNC listen on loopback inside the container.
 | `QPT_AUTHZ_URL` | empty | A forward-auth endpoint (`/api/authz/auth-request` style). When set, every request must carry a session that it accepts, so the published port is not an unauthenticated side door. |
 | `QPT_PUBLIC_URL` | empty | The public origin sent to that endpoint as `X-Original-URL`. |
 | `QPT_EMULATOR_MEMORY`, `QPT_EMULATOR_CORES` | `4096`, `4` | Guest RAM in MiB and vCPUs. |
+| `QPT_EMULATOR_GPU` | `swangle` | The emulator's `-gpu` mode. See [Memory](#memory). |
+
+## Memory
+
+The emulator renders in software on the host, so the guest's surfaces and textures are
+host memory inside the emulator process, in addition to the guest's RAM. That memory
+grows while the checks open screens, play video and restart the app, and a snapshot load
+releases it. Measured through the same three checks (`smoke`, `native_smoke`,
+`panels_smoke`) from a fresh boot, the emulator's memory outside guest RAM:
+
+| `-gpu` | At the start | Highest |
+| --- | --- | --- |
+| `swiftshader_indirect` (the old default) | 0.8 GiB | 2.4 GiB |
+| `swiftshader` | 0.7 GiB | 2.2 GiB |
+| `swangle` (default) | 0.4 GiB | 1.3 GiB |
+
+The emulator allocates with tcmalloc, which keeps freed memory by default. The supervisor
+starts it with `TCMALLOC_AGGRESSIVE_DECOMMIT=true`, so the memory a snapshot load releases
+goes back to the system: after a test the emulator returns to about its starting size
+instead of keeping its highest. Turning off transparent huge pages for the emulator
+changed nothing.
+
+The growth during a run is inherent to software rendering: about 0.1 GiB for each minute
+of checks with `swangle`, and the guest's RAM fills toward its 4 GiB as well. The whole
+`tools/tv-checks.sh` suite (about 30 minutes) peaked at 7.7 GiB for the container. With
+`swiftshader_indirect` the same suite was killed at the old 10 GiB limit. The 12 GiB
+limit leaves about 4 GiB for the suite to grow; a longer suite needs a larger limit, or a
+snapshot load between its checks.
 
 ## Limits
 
