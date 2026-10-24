@@ -24,3 +24,5 @@ python3 -u "$source_directory/tools/restyle_smoke.py"
 python3 -u "$source_directory/tools/library_smoke.py"
 python3 -u "$source_directory/tools/layout_smoke.py"
 python3 -u "$source_directory/tools/layout_smoke.py" --density-320
+# Last: the emulator's memory grows through the run, and library_smoke.py is the heaviest check.
+python3 -u "$source_directory/tools/cold_start_smoke.py"

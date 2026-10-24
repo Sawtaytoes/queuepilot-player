@@ -22,7 +22,10 @@ the selected entry, and Back from a top-level screen returns to the rail. Home l
 server's order. A card names its audience as text ("Ada, Grace") beside the faces, and says
 whom the queue plays as ("Plays as Grace") as information only: nobody chooses a profile to
 use a queue, because QueuePilot plays each queue as the profile it names. A queue locked on the
-TV carries a lock. While a people filter is active, Home and
+TV carries a lock. When QueuePilot cannot be reached, Home and Watching show the last saved
+queues under "Saved queues · reconnect to start playback" and keep asking: after 2, 4, 8, 15
+and 30 seconds, as soon as Android reports a network, and when the app resumes. The live
+queues replace the saved ones as soon as QueuePilot answers. While a people filter is active, Home and
 Watching say "Showing N of M queues" with a one-press **Clear**. The continue cards name
 the queue or the media server they come from; an episode is named by its show, then
 "S1 · E9 · Title". The rail's avatar switches profile. The chosen profile is used for library browsing,
@@ -200,7 +203,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.6.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.5.8.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
 without involving a household TV; `tools/tv-lab.sh test` runs them there.
 

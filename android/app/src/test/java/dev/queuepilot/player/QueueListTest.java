@@ -44,4 +44,19 @@ public class QueueListTest {
         targets.addable().stream().map(Listed::id).toList());
     assertEquals(1, targets.rules());
   }
+
+  @Test
+  public void savedQueuesAreRetriedSoonThenLessOftenThenOnlyOnANetworkOrResume() {
+    assertEquals(2000, QueueList.liveRetryDelayMs(0));
+    assertEquals(4000, QueueList.liveRetryDelayMs(1));
+    assertEquals(8000, QueueList.liveRetryDelayMs(2));
+    assertEquals(15000, QueueList.liveRetryDelayMs(3));
+    assertEquals(30000, QueueList.liveRetryDelayMs(4));
+    assertEquals(-1, QueueList.liveRetryDelayMs(5));
+    assertEquals(-1, QueueList.liveRetryDelayMs(-1));
+    // The timed retries cover the emulator's measured boot gap (Wi-Fi 23 s after the app opened).
+    long total = 0;
+    for (int i = 0; QueueList.liveRetryDelayMs(i) >= 0; i++) total += QueueList.liveRetryDelayMs(i);
+    assertTrue(total > 23000);
+  }
 }

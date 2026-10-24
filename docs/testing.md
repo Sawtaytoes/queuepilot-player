@@ -56,7 +56,7 @@ inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.p
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
 `rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `household_smoke.py`,
 `library_smoke.py`, and
-`layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
+`layout_smoke.py` (240 and 320), and last `cold_start_smoke.py`. Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
@@ -149,6 +149,21 @@ the poster fetch. It then opens the locked queue: the number pad, four wrong PIN
 the fifth one's 60-second wait, and the right PIN playing the queue with Morgan's grant and the
 unlock header. Finally it leaves the app with Home and returns, and the PIN is asked again. `rail_smoke.py` counts
 History among the rail entries.
+
+`cold_start_smoke.py` runs last, after the heaviest check (`library_smoke.py`), because the
+shared emulator's memory grows through a run: two runs with it placed after the household check
+had the emulator killed by the container's 10 GiB memory limit during `library_smoke.py`. It
+resets the density, then force-stops the app and launches it: Home
+must show the live queues and never the heading "Saved queues · reconnect to start playback".
+Then it turns the emulator's Wi-Fi off before a cold start, which is the state at boot (the
+shared emulator's Wi-Fi connected 23 s after the app opened): Home shows the saved queues, the
+`QueuePilotQueues` log has the `java.net.ConnectException`, and when Wi-Fi returns the live
+queues replace the saved ones with no key press. It then makes the fixture's
+`/api/native/queues` answer 503 for a cold start and restores it: the timed retry (2 s, then 4,
+8, 15 and 30 s) draws the live queues. Last, it leaves the app with Home while QueuePilot is
+down, waits until the next timed retry is 8 s away, restores QueuePilot, and returns: the resume
+retries at once. Wi-Fi is turned back on whatever the result, and the run's snapshot restore
+resets the guest afterward.
 
 `library_smoke.py` follows the queue and history check. The fixture's **Archive** library
 (section 3) holds 305 invented films across the alphabet, with no X and four titles under "#".

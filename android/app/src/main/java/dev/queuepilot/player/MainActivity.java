@@ -33,6 +33,18 @@ import org.json.JSONObject;
 public final class MainActivity extends androidx.activity.ComponentActivity {
   private final ExecutorService network = Executors.newFixedThreadPool(4);
   private final Handler handler = new Handler(Looper.getMainLooper());
+
+  /** The logcat tag of the queue list's failures and live retries. */
+  static final String QUEUE_LOG = "QueuePilotQueues";
+
+  /**
+   * The pending live retry of a screen that shows saved queues, or none. At boot, or when a TV
+   * wakes, the app can open before Android has a default network; the first request then fails
+   * and the screen keeps asking until QueuePilot answers (see {@link #loadLiveQueueLists}).
+   */
+  private LiveQueueRetry queueRetry;
+
+  private android.net.ConnectivityManager.NetworkCallback networkCallback;
   private final Deque<Screen> history = new ArrayDeque<>();
   private final Map<Screen, String> focusMemory = new HashMap<>();
   private final StoryOrder demo = StoryOrder.demo();
@@ -174,6 +186,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     } catch (Exception e) {
       Toast.makeText(this, "Please sign in again to restore access.", Toast.LENGTH_LONG).show();
     }
+    watchDefaultNetwork();
     setProfile(prefs().getString("active", "demo-ada"));
     if (profile != null || prefs().getBoolean("preview", false)) home();
     else if (!account.optString("token").isEmpty()) openOwnProfile();
@@ -259,6 +272,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     closePanels();
     generation++;
     handler.removeCallbacksAndMessages(null);
+    queueRetry = null;
     releasePlayer();
   }
 
@@ -721,21 +735,165 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     outer.addView(queueArea, outer.indexOfChild(cardsParent));
     TextView loading = ui.text("Finding your queues…", 15, TvUi.MUTED);
     queueArea.addView(loading);
-    loadQueueLists(
+    // A live answer that follows saved queues replaces them. Focus moves with it only when it
+    // was on the replaced cards, on the card this method focused, or nowhere: a viewer who has
+    // moved on to the library or the rail keeps their place.
+    View[] placed = new View[1];
+    loadLiveQueueLists(
         origin,
         (all, shown) -> {
           if (request != generation) return;
+          // Decided before the old cards go: removing a focused card moves focus elsewhere.
+          boolean isFocusOurs = isFocusOurs(placed[0], queueArea);
           queueArea.removeAllViews();
           View first = renderQueueGroups(queueArea, all, shown, origin, true);
           if (first == null) first = cards.getChildAt(0);
-          focusFirst(first);
+          if (isFocusOurs) {
+            placed[0] = first;
+            focusFirst(first);
+          }
         },
         error -> {
           if (request != generation) return;
+          boolean isFocusOurs = isFocusOurs(placed[0], queueArea);
+          if (loading.getParent() == null) {
+            queueArea.removeAllViews();
+            queueArea.addView(loading);
+          }
           loading.setText("QueuePilot couldn't be reached. Your library is still here.");
           ui.primaryCard(cards.getChildAt(0));
-          focusFirst(cards.getChildAt(0));
+          if (isFocusOurs) {
+            placed[0] = cards.getChildAt(0);
+            focusFirst(placed[0]);
+          }
         });
+  }
+
+  /**
+   * True on the first answer (placed is null), or when focus is nowhere, on the view this screen
+   * placed it on, or inside {@code area}. A viewer who moved on keeps their place.
+   */
+  private boolean isFocusOurs(View placed, ViewGroup area) {
+    if (placed == null) return true;
+    View focused = getWindow().getDecorView().findFocus();
+    return focused == null || focused == placed || isWithin(focused, area);
+  }
+
+  private static boolean isWithin(View view, ViewGroup parent) {
+    for (View v = view; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null)
+      if (v == parent) return true;
+    return false;
+  }
+
+  /**
+   * Like {@link #loadQueueLists}, but a screen that got the saved copy, or nothing, keeps asking
+   * for the live list: after a short backoff ({@link QueueList#liveRetryDelayMs}), as soon as
+   * Android reports a new default network, and when the app resumes. {@code loaded} runs again
+   * with the live answer. Leaving the screen cancels the retry.
+   */
+  private void loadLiveQueueLists(
+      String origin,
+      java.util.function.BiConsumer<JSONObject, JSONObject> loaded,
+      java.util.function.Consumer<Exception> failed) {
+    attemptLiveQueueLists(new LiveQueueRetry(origin, loaded, failed, generation));
+  }
+
+  private void attemptLiveQueueLists(LiveQueueRetry retry) {
+    loadQueueLists(
+        retry.origin,
+        (all, shown) -> {
+          if (retry.request != generation) return;
+          String state = all.optBoolean("cached") ? "saved" : "live";
+          if (state.equals("saved")) armQueueRetry(retry);
+          else if (!retry.state.isEmpty()) android.util.Log.i(QUEUE_LOG, "Live queues after a retry");
+          // The same saved copy again is not drawn again: that would move a viewer's focus.
+          if (state.equals("saved") && state.equals(retry.state)) return;
+          retry.state = state;
+          retry.loaded.accept(all, shown);
+        },
+        error -> {
+          if (retry.request != generation) return;
+          android.util.Log.w(QUEUE_LOG, "Queue list and its saved copy unavailable", error);
+          armQueueRetry(retry);
+          if ("failed".equals(retry.state)) return;
+          retry.state = "failed";
+          retry.failed.accept(error);
+        });
+  }
+
+  private void armQueueRetry(LiveQueueRetry retry) {
+    if (queueRetry != null) handler.removeCallbacks(queueRetry);
+    queueRetry = retry;
+    long delay = QueueList.liveRetryDelayMs(retry.attempt);
+    retry.attempt++;
+    if (delay >= 0) handler.postDelayed(retry, delay);
+    android.util.Log.i(
+        QUEUE_LOG,
+        "Queues not live; retry "
+            + (delay >= 0 ? "in " + delay + " ms" : "on a new network or a resume"));
+  }
+
+  /** A new default network or a resume asks at once, and starts the backoff again. */
+  private void retryQueuesNow(String reason) {
+    LiveQueueRetry retry = queueRetry;
+    if (retry == null || retry.request != generation) return;
+    android.util.Log.i(QUEUE_LOG, "Live queue retry now: " + reason);
+    retry.attempt = 0;
+    handler.removeCallbacks(retry);
+    retry.run();
+  }
+
+  /** One screen's pending request for the live queue list. */
+  private final class LiveQueueRetry implements Runnable {
+    final String origin;
+    final java.util.function.BiConsumer<JSONObject, JSONObject> loaded;
+    final java.util.function.Consumer<Exception> failed;
+    final int request;
+    int attempt;
+    /** What the screen shows: "" before the first answer, then "saved", "failed", or "live". */
+    String state = "";
+
+    LiveQueueRetry(
+        String origin,
+        java.util.function.BiConsumer<JSONObject, JSONObject> loaded,
+        java.util.function.Consumer<Exception> failed,
+        int request) {
+      this.origin = origin;
+      this.loaded = loaded;
+      this.failed = failed;
+      this.request = request;
+    }
+
+    @Override
+    public void run() {
+      if (queueRetry != this) return;
+      queueRetry = null;
+      if (request == generation) attemptLiveQueueLists(this);
+    }
+  }
+
+  /**
+   * Saved queues ask again the moment Android has a default network. At boot the emulator's
+   * Wi-Fi connected 23 s after the app opened, and the first request had failed with
+   * "ConnectException: Failed to connect" in that gap.
+   */
+  private void watchDefaultNetwork() {
+    try {
+      android.net.ConnectivityManager connectivity =
+          getSystemService(android.net.ConnectivityManager.class);
+      if (connectivity == null) return;
+      networkCallback =
+          new android.net.ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(android.net.Network network) {
+              runOnUiThread(() -> retryQueuesNow("network available"));
+            }
+          };
+      connectivity.registerDefaultNetworkCallback(networkCallback);
+    } catch (RuntimeException e) {
+      networkCallback = null;
+      android.util.Log.w(QUEUE_LOG, "No network callback; saved queues retry on a timer", e);
+    }
   }
 
   /**
@@ -926,6 +1084,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   cacheFile("native-tv", origin, path).toPath(),
                   response.toString().getBytes(StandardCharsets.UTF_8));
             } catch (Exception offline) {
+              android.util.Log.w(QUEUE_LOG, "Queue list failed, showing the saved copy: " + path, offline);
               response =
                   new JSONObject(
                       new String(
@@ -2859,7 +3018,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.gap(content, 16);
     content.addView(area);
     int request = generation;
-    loadQueueLists(
+    loadLiveQueueLists(
         origin,
         (all, shown) -> {
           if (request != generation) return;
@@ -2869,7 +3028,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   + " · "
                   + (queues == null ? 0 : queues.length())
                   + " queues");
-          renderQueueGroups(area, all, shown, origin, false);
+          // A live answer after saved queues replaces them, keeping focus in the grid.
+          View focused = getWindow().getDecorView().findFocus();
+          boolean isFocusInside = focused != null && isWithin(focused, area);
+          area.removeAllViews();
+          View first = renderQueueGroups(area, all, shown, origin, false);
+          if (isFocusInside && first != null) first.requestFocus();
         },
         error -> {
           if (request == generation)
@@ -5677,6 +5841,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   @Override
+  protected void onResume() {
+    super.onResume();
+    // Coming back to a screen that still shows saved queues asks QueuePilot again at once.
+    retryQueuesNow("resumed");
+  }
+
+  @Override
   protected void onStop() {
     super.onStop();
     // An unlock lasts until the app leaves the foreground (decision 2026-10-23). A sitting that
@@ -5697,6 +5868,15 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     releasePlayer();
     network.shutdownNow();
     progressNetwork.shutdown();
+    if (networkCallback != null) {
+      try {
+        getSystemService(android.net.ConnectivityManager.class)
+            .unregisterNetworkCallback(networkCallback);
+      } catch (RuntimeException ignored) {
+        // Already unregistered.
+      }
+      networkCallback = null;
+    }
     super.onDestroy();
   }
 }

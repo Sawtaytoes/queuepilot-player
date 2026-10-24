@@ -45,4 +45,18 @@ final class QueueList {
   static String filterSummary(int shown, int total) {
     return "Showing " + shown + " of " + total + (total == 1 ? " queue" : " queues");
   }
+
+  /**
+   * The waits before a screen showing saved queues asks QueuePilot again: soon, then less often.
+   * At boot, or when a TV wakes, the app can open before Android has a network.
+   */
+  private static final long[] LIVE_RETRY_MS = {2000, 4000, 8000, 15000, 30000};
+
+  /**
+   * The wait before the live retry that follows attempt {@code attempt} (0 is the first request),
+   * or -1 once the timed retries are spent. A new network or a resume still asks again.
+   */
+  static long liveRetryDelayMs(int attempt) {
+    return attempt >= 0 && attempt < LIVE_RETRY_MS.length ? LIVE_RETRY_MS[attempt] : -1;
+  }
 }
