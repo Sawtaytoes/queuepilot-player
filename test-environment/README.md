@@ -161,7 +161,8 @@ changed nothing.
 
 The growth during a run is inherent to software rendering: about 0.1 GiB for each minute
 of checks with `swangle`, and the guest's RAM fills toward its 4 GiB as well. The whole
-`tools/tv-checks.sh` suite (about 30 minutes) peaked at 7.7 GiB for the container. With
+`tools/tv-checks.sh` suite (about 30 minutes) peaked at 7.7 GiB and 8.1 GiB for the
+container in two runs (the second, from `c3129ed`, passed every check). With
 `swiftshader_indirect` the same suite was killed at the old 10 GiB limit. The 12 GiB
 limit leaves about 4 GiB for the suite to grow; a longer suite needs a larger limit, or a
 snapshot load between its checks.
