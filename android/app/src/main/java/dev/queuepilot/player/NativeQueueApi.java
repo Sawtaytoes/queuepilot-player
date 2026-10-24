@@ -5,16 +5,36 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import org.json.JSONObject;
 
-/** QueuePilot JSON requests. Credentials stay on the explicitly configured origin. */
+/**
+ * QueuePilot JSON requests. Credentials stay on the explicitly configured origin.
+ *
+ * <p>Every request that carries the TV's Plex proof also names this install
+ * ({@code X-QueuePilot-Device}) and, after the household TV PIN was entered, the unlock token
+ * ({@code X-QueuePilot-Unlock}). The server binds an unlock to the device and the account it was
+ * issued to, and answers 423 for a locked queue without it.
+ */
 final class NativeQueueApi {
   static final class Failure extends Exception {
     final int status;
+    final JSONObject body;
 
-    Failure(int status, String message) {
+    Failure(int status, String message, JSONObject body) {
       super(message);
       this.status = status;
+      this.body = body == null ? new JSONObject() : body;
+    }
+
+    /** 423: the queue is locked on the TV and this device has no valid unlock. */
+    boolean isLocked() {
+      return status == 423 && body.optBoolean("isLocked");
     }
   }
+
+  /** This install's stable identifier, the Plex client id. Set once at startup. */
+  static volatile String deviceId = "";
+
+  /** The unlock token from {@code POST /api/native/unlock}, or empty. Held in memory only. */
+  static volatile String unlockToken = "";
 
   static JSONObject request(
       String origin, String path, JSONObject body, String header, String secret) throws Exception {
@@ -35,6 +55,12 @@ final class NativeQueueApi {
     c.setRequestProperty("Accept", "application/json");
     if (!secret.isEmpty()) c.setRequestProperty(header, secret);
     if (!proof.isEmpty()) c.setRequestProperty("X-Plex-Profile-Token", proof);
+    // Every authorized request names this install and carries the unlock, whichever header
+    // holds its credential: most routes send the Plex proof as "header", not as "proof".
+    if (!secret.isEmpty() || !proof.isEmpty()) {
+      if (!deviceId.isEmpty()) c.setRequestProperty("X-QueuePilot-Device", deviceId);
+      if (!unlockToken.isEmpty()) c.setRequestProperty("X-QueuePilot-Unlock", unlockToken);
+    }
     try {
       if (body != null) {
         c.setRequestMethod("POST");
@@ -59,7 +85,8 @@ final class NativeQueueApi {
         }
         JSONObject result = new JSONObject(out.toString(StandardCharsets.UTF_8.name()));
         if (status >= 400)
-          throw new Failure(status, result.optString("error", "QueuePilot is unavailable"));
+          throw new Failure(
+              status, result.optString("error", "QueuePilot is unavailable"), result);
         return result;
       }
     } finally {

@@ -107,7 +107,11 @@ def main():
     click('Settings');click('Connect Plex');contains('ABCD');shot('plex-link')
     back();post('_claim');time.sleep(3);contains('Settings') # canceled authorization cannot save an account
     assert not 'fixture-root' in adb('shell','run-as',PACKAGE,'cat','shared_prefs/state.xml').decode()
-    post('_expire_next');click('Connect Plex');contains('This code has expired');click('New code');contains('ABCD');post('_claim');contains("Who's watching?");shot('profile-picker')
+    post('_expire_next');click('Connect Plex');contains('This code has expired');click('New code');contains('ABCD');post('_claim')
+    # No profile choice before Home: sign-in opens the account's own profile, because queues play
+    # as the profile each queue names. The picker stays one press away on the rail avatar.
+    contains('What are we watching?');contains('Demo Cinema');shot('signed-in-own-profile')
+    click('Switch profile, Ada');contains("Who's watching?");shot('profile-picker')
     click('Morgan');enter_pin('1111');contains("Plex couldn't unlock that profile");click('Choose profile');click('Ada');contains('What are we watching?');contains('Demo Cinema');shot('signed-in-home')
     click('Series');open_library('Series');contains('Orbit Nine');shot('library')
     click('Orbit Nine');contains('Season 1');click('Season 1');contains('S1 · E9 · The signal');click('Orbit Nine, S1 · E9 · The signal');contains('Watch with Ada');contains('Orbit Nine');shot('title')
@@ -123,5 +127,5 @@ def main():
     assert any(r['profile']=='grace' for r in requests)
     assert all(r['profile']!='unknown' for r in requests),'No Plex account token may be sent to a media server'
     crashes=adb('logcat','-d','-b','crash').decode();assert 'FATAL EXCEPTION' not in crashes,crashes
-    print('PASS: queue-first UI, D-pad navigation, code expiry/cancel, profile PIN enforcement, server discovery, encrypted tokens, direct playback/cast, back navigation, cached profile/library access, and demo order persistence')
+    print('PASS: queue-first UI, D-pad navigation, code expiry/cancel, sign-in straight to Home, profile PIN enforcement, server discovery, encrypted tokens, direct playback/cast, back navigation, cached profile/library access, and demo order persistence')
 if __name__=='__main__':main()

@@ -52,7 +52,7 @@ assert int(stopped['time'][0])>=0.9*int(stopped['duration'][0]),stopped
 s.back();s.contains('Watch with Ada')
 
 # Queue playback: the same skips, and final credits complete the item and start the next one.
-s.post('_native_reset');s.click('Home');s.click('Watching');s.contains('2 queues');s.click('Movies & Shows · 2. Ada, Grace. Picks. Play queue')
+s.post('_native_reset');s.click('Home');s.click('Watching');s.contains('2 queues');s.click('Movies & Shows · 2. Ada, Grace. Picks. Plays as Ada. Play queue')
 skip('Skip Intro','marker-queue-skip-intro')
 at=queue_paused_at();assert 14000<=at<18000,at;s.adb('shell','input','keyevent','126')
 skip('Skip Credits','marker-queue-skip-credits')

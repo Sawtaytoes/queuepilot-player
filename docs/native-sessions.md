@@ -10,12 +10,22 @@ separate; the TV client never invokes it.
 The server uses the existing audience predicate, including required people and group minimums.
 Selecting people narrows queues; it does not choose the playback identity.
 
-`POST /api/native/sessions` supplies `{setId}` and `X-Plex-Profile-Token`. Plex verifies the
-actual Home identity, then the server requires the queue binding to match before selecting.
-The plan preserves full engine-selected batches, source server IDs, resume offsets and
-section windows. It returns an expiring session capability and ordered media IDs without
-Plex credentials. The client resolves each source server with the selected profile's scoped
-credential and streams directly. Cloud tokens never go to a media server.
+`POST /api/native/sessions` supplies `{setId}`, `X-Plex-Profile-Token`, and
+`X-QueuePilot-Device` (the install's own identifier). Plex verifies that the token belongs to the
+server owner's Plex Home; the TV is authorized as a household device, and its profile does not
+have to match the queue. The server plays the queue as the profile the queue names
+(`requires_profile`, else the routing binding, else the owner). The plan preserves full
+engine-selected batches, source server IDs, resume offsets and section windows. It returns an
+expiring session capability, ordered media IDs, and `grants`: the queue profile's
+server-scoped Plex token and verified address for each server the items live on. The client
+streams each item directly with that grant, so a queue plays as its own profile whichever
+profile the TV has chosen; the chosen profile is used only outside queues. Cloud tokens never
+go to a media server, and the grants are held in memory only.
+
+A queue marked "Locked on TV" answers `423 {error, isLocked: true}` until the household TV PIN
+is traded for an unlock token at `POST /api/native/unlock {pin}`. The client sends it as
+`X-QueuePilot-Unlock` on later requests and forgets it when the app leaves the foreground. A
+started session continues on its session key without asking again.
 
 ## History and continuation
 

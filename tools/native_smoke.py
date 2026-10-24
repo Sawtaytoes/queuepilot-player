@@ -36,7 +36,7 @@ s.contains('5 queues');s.shot('native-queues')
 assert 'Manga' not in s.text() and 'Webtoons' not in s.text()
 s.click('Choose people');s.click('Grace');s.click('Apply');s.contains('0 queues');s.contains('Showing 0 of 5 queues')
 s.click('Choose people');s.click('Ada');s.click('Apply');s.contains('2 queues');s.contains('Showing 2 of 5 queues');s.shot('native-people-filter')
-s.click('Movies & Shows · 2. Ada, Grace. Picks. Play queue');time.sleep(6)
+s.click('Movies & Shows · 2. Ada, Grace. Picks. Plays as Ada. Play queue');time.sleep(6)
 # Rewind on resume is Off by default: resuming continues from the paused position.
 assert abs(pause_and_resume())<650
 s.adb('shell','input','keyevent','127');s.contains('S1 · E9 · The signal');s.contains('Orbit Nine');s.adb('shell','input','keyevent','19');# The episode has no Role entries; its cast and faces come from the show.
@@ -68,7 +68,7 @@ s.adb('shell','input','keyevent','126');wait_for(lambda:'Your watching queues' i
 s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Watching');s.contains('2 queues')
 # A stored choice wins over the Off default, then Off is restored for the following checks.
 s.click('Settings');s.click('Rewind on resume · Off');s.click('3 seconds');s.contains('Rewind on resume · 3 seconds')
-s.post('_native_reset');s.click('Watching');s.click('Movies & Shows · 2. Ada, Grace. Picks. Play queue');time.sleep(6)
+s.post('_native_reset');s.click('Watching');s.click('Movies & Shows · 2. Ada, Grace. Picks. Plays as Ada. Play queue');time.sleep(6)
 assert abs(pause_and_resume()-3000)<650
 s.adb('shell','input','keyevent','127');s.back();s.contains('Your watching queues')
 s.click('Settings');s.click('Rewind on resume · 3 seconds');s.click('Off');s.contains('Rewind on resume · Off')

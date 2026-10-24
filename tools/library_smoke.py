@@ -90,12 +90,14 @@ key(19);above=focused().get('content-desc');assert above in TITLES[max(0,m-2*col
 target=TITLES[offsets['S']];s.click('Jump to S');focus_is(target)
 key(23);s.contains('Watch with Ada');s.back();focus_is(target)
 
-# 4. Add to queue: only Picks queues that play as Ada; Rules and other profiles are explained.
+# 4. Add to queue: every Picks queue, whoever it plays as; the Rules queue is explained, and a
+# locked queue is listed with its lock (adding to it asks for the TV PIN).
 s.click(target);s.contains('Watch with Ada');s.click('Add to queue')
 wait_desc('Add to Movies & Shows. Ada');wait_desc('Add to Movies & Shows · 2. Ada, Grace')
-shown=texts();assert not any(t.startswith('Movies · ') for t in shown),shown
+wait_desc('Add to Movies. Grace');wait_desc('Add to Movies. Ada, Grace. Locked')
+shown=texts();assert 'Movies · Ada' not in shown,shown
 wait_text("Rules queues choose their own titles, so they can't take a title you add.")
-wait_text('2 Picks queues play as another profile. Switch profile to add to them.')
+assert not any('another profile' in t or 'Switch profile' in t for t in shown),shown
 s.shot('library-add-to-queue')
 s.click('Add to Movies & Shows. Ada');wait_text('Added to queue');wait_text(target+' is now at the top of Movies & Shows.')
 s.shot('library-added');s.click('Close')
@@ -160,4 +162,4 @@ for node in [n for n in nodes() if n.get('content-desc','').startswith('Jump to 
 s.shot('library-title-sort-320dpi')
 s.adb('shell','wm','size','reset');s.adb('shell','wm','density','reset')
 assert 'FATAL EXCEPTION' not in s.adb('logcat','-d','-b','crash').decode()
-print(f'PASS: {TOTAL}-title library in title order with {columns} columns, infinite scroll in both directions with no paging buttons, letter jump and Back restoration, five sorts remembered across a restart, add to queue with Rules and other-profile notes and a duplicate, an episode added as its show, search grouped by type from the rail and within a library',flush=True)
+print(f'PASS: {TOTAL}-title library in title order with {columns} columns, infinite scroll in both directions with no paging buttons, letter jump and Back restoration, five sorts remembered across a restart, add to queue for every Picks queue with the Rules note, a locked queue, and a duplicate, an episode added as its show, search grouped by type from the rail and within a library',flush=True)

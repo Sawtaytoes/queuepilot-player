@@ -64,7 +64,8 @@ if s.has_desc('Switch profile, Morgan'):s.click('Switch profile, Morgan');s.clic
 set_size(100)
 s.click('Watching');wait_text('Your watching queues')
 if 'Clear' in texts():s.click('Clear')
-wait_text('Switches profile')
+wait_text('Plays as Grace')
+assert not any('Switch' in t for t in texts()),'No profile switch in front of a queue'
 
 # Every queue card carries a Full queue action that names the queue and its audience.
 for name in ('Full queue. Movies & Shows. Ada','Full queue. Movies & Shows · 2. Ada, Grace','Full queue. Movies. Ada'):wait_desc(name)
@@ -123,16 +124,24 @@ wait(lambda:any(e['state']=='stopped' for e in get('/_native_events')),'a stoppe
 s.back();wait_text('Your watching queues')
 
 # 1B, an artwork grid, because the queue is mostly movies. Watched cards stay, dimmed; the grid
-# gains columns at a smaller Display size and loses them at a larger one.
+# gains columns at a smaller Display size and loses them at a larger one. It is ONE wrapping
+# grid: the seven one-film entries after the lineup share rows, with no heading each, and the
+# next item is marked by its badge, not by a line that breaks the row.
 columns={}
 for percent in (100,125):
     if percent!=100:set_size(percent);s.click('Watching');wait_text('Your watching queues')
-    s.click('Full queue. Movies & Shows · 2. Ada, Grace');wait_text('Lantern Pictures')
-    wait_text('Friday films');wait_text('Next · 38 min left')
+    s.click('Full queue. Movies & Shows · 2. Ada, Grace');wait_text('Friday films')
+    wait_text('Next · 38 min left')
     assert 'Show 2 watched items' not in texts() and texts().count('Watched')==2,'The grid keeps watched cards in place'
-    order('Paper Moons',"TONIGHT'S LINEUP · STARTS AT YOUR NEXT ITEM",'Glass City','Signal Fire',"Tonight's lineup ends here",'North of Tomorrow')
-    scroll_to('5. North of Tomorrow');row=first_row('5. North of Tomorrow')
+    assert "TONIGHT'S LINEUP · STARTS AT YOUR NEXT ITEM" not in texts(),'The next marker must not break a grid row'
+    assert not any(t.startswith('Lantern Pictures · ') for t in texts()),'A one-item entry has no heading of its own'
+    order('Paper Moons','Glass City','Signal Fire',"Tonight's lineup ends here",'North of Tomorrow')
+    # Down from the next item (Glass City, third column) lands on the poster below it in the
+    # flowing grid: Small Hours, on the same row as North of Tomorrow at both sizes.
+    scroll_to('7. Small Hours');row=first_row('5. North of Tomorrow')
     columns[percent]=len(row)
+    # Several posters from different entries share the row: the one-per-row defect is gone.
+    assert len(row)>=3,('One poster per row',percent,[n.get('content-desc') for n in row])
     assert all(0<=bounds(n)[0] and bounds(n)[2]<=width for n in row),'A card runs off the screen'
     s.shot(f'fullqueue-grid-{percent}')
     s.back();wait_text('Your watching queues')
@@ -146,14 +155,21 @@ s.click('1. Salt and Copper. Next')
 wait_text('Close');assert 'Start here, then continue' not in texts() and 'Mark watched' not in texts(),texts()
 s.shot('fullqueue-rules');s.click('Close');s.back();wait_text('Your watching queues')
 
-# A queue that plays as another profile asks for the switch instead of failing.
-s.click('Full queue. Movies. Grace');wait(lambda:any(t.startswith('This queue plays as Grace.') for t in texts()),'the profile notice')
-wait_text('Switch profile');s.back();wait_text('Your watching queues')
+# A queue that plays as another profile opens with no profile switch: the TV is a household
+# device, and the server reads the queue as the profile it names. Its four one-film entries
+# share one row.
+s.click('Full queue. Movies. Grace');wait_text('Glass City');wait_text('Paper Moons')
+assert not any('Switch' in t or 'plays as' in t for t in texts()),texts()
+row=first_row('1. Glass City');assert len(row)==4,[n.get('content-desc') for n in row]
+call=[c for c in get('/_native_calls') if c['path']=='/api/native/queues/movies-grace/full'][-1]
+assert call['proof'] in ('fixture-root','fixture-user-ada') and len(call['device'])>=8,call
+s.shot('fullqueue-other-profile');s.back();wait_text('Your watching queues')
 
 # History (2B): queue, then sitting, then what was watched. It is reached from the rail.
 s.click('History');wait_text('3 sittings in 2 queues · Last 30 days')
 assert get('/_history_requests')[-1]=={'days':30}
-wait_text('Ada · Watch history'.upper())
+wait_text('Every queue · Watch history'.upper())
+wait_text('1 locked queue is not shown · Enter PIN')
 spans=[t for t in texts() if re.match(r'^(TODAY|YESTERDAY|[A-Z]+DAY, [A-Z]+ \d+) · (ABOUT )?\d+:\d\d [AP]M( TO \d+:\d\d [AP]M)?$',t)]
 assert len(spans)==3,[t for t in texts() if ' · ' in t]
 assert sum('ABOUT ' in t for t in spans)==1,'A play recorded before exact times says about'

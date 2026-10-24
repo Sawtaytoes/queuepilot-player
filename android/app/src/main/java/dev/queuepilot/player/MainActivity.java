@@ -65,19 +65,19 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private boolean isSkipDismissed;
   private boolean isControllerVisible;
   private String playingOrigin = "", playingToken = "";
+  /** The playing poster for the media session: JPEG bytes, and a tokenless LAN address. */
+  private byte[] playingArtwork;
+
+  private String playingArtworkUri = "";
   private long sectionFloor, sectionEnd = -1;
   private boolean advancing;
   private final Set<TvPanel> panels = new HashSet<>();
   private final RewindOnResume rewind = new RewindOnResume();
-  private JSONObject pendingNativeQueue;
   /** The catalog entry of the queue being played, saved with the profile's resume snapshot. */
   private JSONObject nativeQueue;
-  private String pendingNativeProfile = "";
   private JSONArray queuePeople = new JSONArray();
   /** Every queue the catalog has listed, by id, so a full queue or history can start one. */
   private final Map<String, JSONObject> knownQueues = new HashMap<>();
-  /** A start chosen in the full queue or history, kept across an explicit profile switch. */
-  private JSONObject pendingNativeStart;
   /** "continue" or "only" when the playing session began at a chosen item, else empty. */
   private String nativeStartMode = "";
   /** The full queue's watched items are folded into one row until the viewer shows them. */
@@ -168,6 +168,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       prefs().edit().putString("plex-client-id", clientId).apply();
     }
     auth = new PlexAccount(clientId, fixture);
+    NativeQueueApi.deviceId = clientId;
     try {
       profiles = store.read();
       account = store.account();
@@ -176,8 +177,28 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
     setProfile(prefs().getString("active", "demo-ada"));
     if (profile != null || prefs().getBoolean("preview", false)) home();
-    else if (!account.optString("token").isEmpty()) render(new Screen("profiles"));
+    else if (!account.optString("token").isEmpty()) openOwnProfile();
     else render(new Screen("welcome"));
+  }
+
+  /**
+   * After sign-in, opens the signed-in account's own Plex profile without a choice: queues play
+   * as the profile each queue names, so nobody has to pick a profile to reach them. The picker
+   * stays one press away on the rail avatar, for library browsing, search, and single titles,
+   * which use the chosen profile. A PIN-protected own profile still shows the picker.
+   */
+  private void openOwnProfile() {
+    JSONObject own = null;
+    JSONArray users = account.optJSONArray("users");
+    String uuid = account.optString("uuid");
+    for (int i = 0; users != null && i < users.length(); i++) {
+      JSONObject user = users.optJSONObject(i);
+      if (user == null) continue;
+      boolean isOwn = uuid.isEmpty() ? user.optBoolean("admin") : uuid.equals(user.optString("uuid"));
+      if (isOwn) own = user;
+    }
+    if (own == null || own.optBoolean("protected")) render(new Screen("profiles"));
+    else selectUser(own);
   }
 
   private void setProfile(String id) {
@@ -229,8 +250,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     if (player != null) reportPlayback("stopped");
     advancing = true;
     nativePlan = null;
-    pendingNativeQueue = null;
-    pendingNativeProfile = "";
 
     if (!history.isEmpty()) render(history.pop());
     else if (current != null && !Set.of("home", "welcome").contains(current.kind())) home();
@@ -737,7 +756,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   /**
-   * Draws the filter notice and the two queue groups. Home uses scrolling rows; Watching uses a
+   * Draws the filter notice and every queue. Home uses scrolling rows; Watching uses a
    * grid. Returns the first queue card, or null when no queue is shown.
    */
   private View renderQueueGroups(
@@ -776,40 +795,32 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       JSONObject queue = shownQueues.optJSONObject(i);
       if (queue != null) list.add(queue);
     }
-    QueueList.Groups<JSONObject> groups =
-        QueueList.group(list, q -> q.optString("requiredProfile"), profileName());
+    // EVERY QUEUE, IN THE SERVER'S ORDER, AS ONE GROUP. Nobody switches profile to use a queue:
+    // the server plays each as the profile it names, which each card states as information.
     View first = null;
     int columns = columns(3), width = itemWidth(columns);
-    for (int g = 0; g < 2; g++) {
-      List<JSONObject> group = g == 0 ? groups.playsAsActive() : groups.switchesProfile();
-      if (group.isEmpty()) continue;
-      TextView label =
-          ui.text(g == 0 ? "Plays as " + profileName() : "Switches profile", 15, TvUi.ACCENT);
-      area.addView(label);
-      ui.gap(area, 10);
-      LinearLayout row = null;
-      for (int i = 0; i < group.size(); i++) {
-        if (row == null || (!isRow && i % columns == 0)) {
-          if (isRow) {
-            HorizontalScrollView scroll = new HorizontalScrollView(this);
-            scroll.setHorizontalScrollBarEnabled(false);
-            scroll.setClipToPadding(false);
-            row = ui.row();
-            row.setPadding(dp(3), dp(3), dp(3), dp(3));
-            scroll.addView(row);
-            area.addView(scroll);
-          } else {
-            row = ui.row();
-            area.addView(row);
-          }
-          ui.gap(area, 18);
+    LinearLayout row = null;
+    for (int i = 0; i < list.size(); i++) {
+      if (row == null || (!isRow && i % columns == 0)) {
+        if (isRow) {
+          HorizontalScrollView scroll = new HorizontalScrollView(this);
+          scroll.setHorizontalScrollBarEnabled(false);
+          scroll.setClipToPadding(false);
+          row = ui.row();
+          row.setPadding(dp(3), dp(3), dp(3), dp(3));
+          scroll.addView(row);
+          area.addView(scroll);
+        } else {
+          row = ui.row();
+          area.addView(row);
         }
-        LinearLayout card = queueCard(group.get(i), g == 1, width, origin);
-        row.addView(withFullQueue(card, group.get(i)));
-        if (first == null) {
-          first = card;
-          ui.primaryCard(card);
-        }
+        ui.gap(area, 18);
+      }
+      LinearLayout card = queueCard(list.get(i), width, origin);
+      row.addView(withFullQueue(card, list.get(i)));
+      if (first == null) {
+        first = card;
+        ui.primaryCard(card);
       }
     }
     if (count == 0)
@@ -846,20 +857,30 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return full;
   }
 
-  private LinearLayout queueCard(
-      JSONObject queue, boolean isOtherProfile, int width, String origin) {
+  private LinearLayout queueCard(JSONObject queue, int width, String origin) {
     String kind = queue.optString("kind").equals("rules") ? "Rules" : "Picks";
+    boolean isLocked = queue.optBoolean("isLocked");
     LinearLayout card =
         ui.card(
-            isOtherProfile ? "Switches to " + queue.optString("requiredProfile") : kind,
-            isOtherProfile
-                ? R.drawable.lucide_arrow_left_right
+            isLocked ? kind + " · Locked" : kind,
+            isLocked
+                ? R.drawable.lucide_lock
                 : kind.equals("Rules") ? R.drawable.lucide_list_filter : R.drawable.lucide_sparkles,
             queue.optString("title", "Movies & Shows"),
             queueAudience(queue),
             "Play queue",
             () -> startNativeQueue(queue),
             width);
+    if (isLocked) card.setTag("queue-locked");
+    // Whom the queue plays as is information only: it never asks anybody to switch profile.
+    String playsAs = QueueList.playsAs(queue.optString("playsAs"));
+    if (!playsAs.isEmpty()) {
+      TextView line = ui.text(playsAs, 13, TvUi.MUTED);
+      line.setTag("queue-plays-as");
+      line.setPadding(0, 0, 0, dp(10));
+      View action = card.findViewWithTag("card-action");
+      card.addView(line, card.indexOfChild(action));
+    }
     LinearLayout faces = ui.row();
     JSONArray people = queue.optJSONArray("people");
     if (people != null)
@@ -875,7 +896,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             + ". "
             + queueAudience(queue)
             + ". "
-            + (isOtherProfile ? "Switches to " + queue.optString("requiredProfile") : kind)
+            + kind
+            + (isLocked ? ". Locked" : "")
+            + (playsAs.isEmpty() ? "" : ". " + playsAs)
             + ". Play queue");
     return card;
   }
@@ -1162,6 +1185,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   new JSONObject()
                       .put("token", secret)
                       .put("name", who.optString("title", who.optString("username", "Plex")))
+                      .put("uuid", who.optString("uuid"))
                       .put("users", users);
               runOnUiThread(
                   () -> {
@@ -1171,7 +1195,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                       account = connected;
                       prefs().edit().putBoolean("preview", false).apply();
                       history.clear();
-                      render(new Screen("profiles"));
+                      openOwnProfile();
                     } catch (Exception e) {
                       hint.setText(
                           "Sign-in succeeded, but credentials could not be saved. Please try"
@@ -1284,7 +1308,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         if (p != null && p.optString("id").equals(id)) {
           setProfile(id);
           home();
-          playPendingNative();
           return;
         }
       }
@@ -1302,12 +1325,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
               .setMessage("Enter this profile's four-digit Plex Home PIN.")
               .setView(form)
               .setPositiveButton("Continue", null)
-              .setNegativeButton(
-                  "Cancel",
-                  (d, w) -> {
-                    pendingNativeQueue = null;
-                    pendingNativeProfile = "";
-                  })
+              .setNegativeButton("Cancel", null)
               .create();
       Runnable update =
           () -> {
@@ -1492,7 +1510,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     setProfile(p.optString("id"));
                     prefs().edit().putBoolean("preview", false).apply();
                     home();
-                    playPendingNative();
                   } catch (Exception e) {
                     status.setText("Credentials could not be saved. Please try again.");
                   }
@@ -2419,7 +2436,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void playEntry(PlexCatalog.Entry entry) {
     status.setText("Opening video…");
     int request = generation;
+    // A single title outside a queue plays as the profile the viewer chose: its token, its
+    // restrictions, and its watch history. Only queues play as their own profile.
     String origin = server(), secret = token();
+    boolean isQueueHome =
+        profile != null
+            && profile.optString("serverId").equals(prefs().getString("queue-home-server", "-"));
     network.execute(
         () -> {
           try {
@@ -2432,11 +2454,15 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                         16 * 1024 * 1024));
             PlexCatalog.Entry detail = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
             if (detail.part().isEmpty()) throw new IllegalStateException();
+            byte[] artwork = nowPlayingArtwork(origin, secret, detail);
+            String artworkUri = isQueueHome ? queueThumbUri(detail) : "";
             runOnUiThread(
                 () -> {
                   if (request == generation) {
                     nativePlan = null;
                     playingEntry = detail;
+                    playingArtwork = artwork;
+                    playingArtworkUri = artworkUri;
                     playingOrigin = origin;
                     playingToken = secret;
                     sectionFloor = 0;
@@ -2458,6 +2484,72 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                 });
           }
         });
+  }
+
+  /**
+   * What other devices show for the playing item. A universal remote (the Unfolded Circle Remote
+   * 3 through its Android TV integration) reads the Shield's Cast media status, which Android
+   * fills from this media session: the title line, and the artwork. Without artwork the remote
+   * falls back to an app icon. So the one title line carries the show, number and episode title,
+   * and the poster is given twice: as bytes, for the TV's own now-playing card, and as a
+   * tokenless QueuePilot address, for a device on the LAN that can only fetch a URL. A Plex
+   * address is never given: it would carry the profile's token to every listener.
+   */
+  private androidx.media3.common.MediaMetadata nowPlayingMetadata(String fallbackTitle) {
+    androidx.media3.common.MediaMetadata.Builder metadata =
+        new androidx.media3.common.MediaMetadata.Builder();
+    PlexCatalog.Entry entry = playingEntry;
+    if (entry == null) return metadata.setTitle(fallbackTitle).build();
+    boolean isEpisode = "episode".equals(entry.type());
+    String line =
+        EpisodeLabel.nowPlaying(
+            entry.type(), entry.title(), entry.showTitle(), entry.season(), entry.episode());
+    metadata
+        .setTitle(line)
+        .setDisplayTitle(line)
+        .setSubtitle(isEpisode ? entry.secondary() : null)
+        .setMediaType(
+            isEpisode
+                ? androidx.media3.common.MediaMetadata.MEDIA_TYPE_TV_SHOW
+                : androidx.media3.common.MediaMetadata.MEDIA_TYPE_MOVIE);
+    if (isEpisode && !entry.showTitle().isEmpty()) metadata.setArtist(entry.showTitle());
+    if (isEpisode && !entry.seasonTitle().isEmpty()) metadata.setAlbumTitle(entry.seasonTitle());
+    if (playingArtwork != null)
+      metadata.setArtworkData(
+          playingArtwork, androidx.media3.common.MediaMetadata.PICTURE_TYPE_FRONT_COVER);
+    if (!playingArtworkUri.isEmpty())
+      metadata.setArtworkUri(android.net.Uri.parse(playingArtworkUri));
+    return metadata.build();
+  }
+
+  /** The poster as JPEG bytes from the playing server, or null. Call off the main thread. */
+  private static byte[] nowPlayingArtwork(String origin, String secret, PlexCatalog.Entry entry) {
+    try {
+      String thumb = entry.posterThumb();
+      if (thumb.isEmpty()) return null;
+      byte[] bytes =
+          PlexCatalog.get(
+              PlexCatalog.url(origin, TitleCast.transcodePath(thumb, 400)), secret, 2 * 1024 * 1024);
+      BitmapFactory.Options bounds = new BitmapFactory.Options();
+      bounds.inJustDecodeBounds = true;
+      BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+      return bounds.outWidth > 0 && bounds.outHeight > 0 ? bytes : null;
+    } catch (Exception unavailable) {
+      return null;
+    }
+  }
+
+  /**
+   * QueuePilot's tokenless poster address for the playing title, or empty. QueuePilot's poster
+   * proxy reads its home Plex server, so this is used only for an item on that server. An
+   * episode uses its show's poster, as the queue's own cards do.
+   */
+  private String queueThumbUri(PlexCatalog.Entry entry) {
+    String origin = prefs().getString("queue-origin", "");
+    String key =
+        "episode".equals(entry.type()) && !entry.showKey().isEmpty() ? entry.showKey() : entry.key();
+    if (origin.isEmpty() || key.isEmpty() || !key.matches("[0-9]+")) return "";
+    return PlexCatalog.url(origin, "/api/thumb/" + key);
   }
 
   private void startPlayer(String url, String secret, String title, String cast) {
@@ -2604,11 +2696,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         new MediaItem.Builder()
             .setUri(url)
             .setMediaId(playingEntry == null ? "video" : playingEntry.key())
-            .setMediaMetadata(
-                new androidx.media3.common.MediaMetadata.Builder()
-                    .setTitle(playingEntry == null ? title : playingEntry.primary())
-                    .setSubtitle(playingEntry == null ? null : playingEntry.secondary())
-                    .build())
+            .setMediaMetadata(nowPlayingMetadata(title))
             .build());
     player.prepare();
     player.play();
@@ -2797,6 +2885,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   /** Who the queue is for, in the web app's text form: "Ada, Grace". */
   private String queueAudience(JSONObject queue) {
+    // The server's own audience line, the same text the web app prints, when it sends one.
+    String audience = queue.optString("audience");
+    if (!audience.isEmpty()) return audience;
     List<String> names = new ArrayList<>();
     JSONArray list = queue.optJSONArray("people");
     if (list != null)
@@ -2872,14 +2963,165 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     dialog.setPanelSize(dp(390), -2);
   }
 
-  private void playPendingNative() {
-    if (pendingNativeQueue != null && activeId.equals(pendingNativeProfile)) {
-      JSONObject queue = pendingNativeQueue, start = pendingNativeStart;
-      pendingNativeQueue = null;
-      pendingNativeStart = null;
-      pendingNativeProfile = "";
-      startNativeQueue(queue, start);
+  // The TV PIN: a queue marked "Locked on TV" in QueuePilot opens only after the household PIN.
+  // The server enforces it (423 without a valid unlock); the TV only decides when to ask.
+
+  /**
+   * When {@code error} is QueuePilot's 423 for a locked queue, asks for the TV PIN and then runs
+   * {@code retry}. Returns false for every other error, which the caller reports as before.
+   */
+  private boolean askPinIfLocked(Exception error, Runnable retry) {
+    if (!(error instanceof NativeQueueApi.Failure failure) || !failure.isLocked()) return false;
+    NativeQueueApi.unlockToken = "";
+    askTvPin(retry);
+    return true;
+  }
+
+  /**
+   * The number pad for the household TV PIN, 4 to 8 digits, driven with the D-pad or the remote's
+   * number keys. A correct PIN keeps locked queues open until the app leaves the foreground.
+   */
+  private void askTvPin(Runnable unlocked) {
+    String origin = prefs().getString("queue-origin", "");
+    if (profile == null || origin.isEmpty()) {
+      message("Locked queue", "Connect Plex and your QueuePilot server to enter the TV PIN.");
+      return;
     }
+    LinearLayout form = ui.column();
+    form.setPadding(dp(24), dp(8), dp(24), dp(16));
+    StringBuilder pin = new StringBuilder();
+    TextView dots = ui.title("○  ○  ○  ○", 30);
+    dots.setGravity(Gravity.CENTER);
+    dots.setTag("tv-pin-dots");
+    form.addView(dots);
+    ui.gap(form, 10);
+    TextView feedback = ui.text("", 14, TvUi.MUTED);
+    feedback.setGravity(Gravity.CENTER);
+    feedback.setTag("tv-pin-message");
+    feedback.setVisibility(View.GONE);
+    form.addView(feedback, new LinearLayout.LayoutParams(-1, -2));
+    ui.gap(form, 12);
+    TvPanel dialog =
+        panel()
+            .setTitle("Enter the TV PIN")
+            .setMessage("This queue is locked on the TV. Enter the QueuePilot TV PIN to open it.")
+            .setView(form)
+            .setPositiveButton("Unlock", null)
+            .setNegativeButton("Cancel", null)
+            .create();
+    boolean[] isBusy = {false};
+    Runnable update =
+        () -> {
+          StringBuilder display = new StringBuilder();
+          for (int i = 0; i < Math.max(4, pin.length()); i++)
+            display.append(i < pin.length() ? "●  " : "○  ");
+          dots.setText(display.toString().trim());
+          dialog.getButton(TvPanel.BUTTON_POSITIVE).setEnabled(pin.length() >= 4 && !isBusy[0]);
+        };
+    java.util.function.Consumer<String> say =
+        text -> {
+          feedback.setText(text);
+          feedback.setVisibility(text.isEmpty() ? View.GONE : View.VISIBLE);
+        };
+    Runnable submit =
+        () -> {
+          if (pin.length() < 4 || isBusy[0]) return;
+          String value = pin.toString();
+          pin.setLength(0);
+          isBusy[0] = true;
+          update.run();
+          say.accept("Checking the PIN…");
+          network.execute(
+              () -> {
+                try {
+                  JSONObject result =
+                      NativeQueueApi.request(
+                          origin,
+                          "/api/native/unlock",
+                          new JSONObject().put("pin", value),
+                          "X-Plex-Profile-Token",
+                          profileProof());
+                  NativeQueueApi.unlockToken = result.optString("unlockToken");
+                  runOnUiThread(
+                      () -> {
+                        dialog.dismiss();
+                        unlocked.run();
+                      });
+                } catch (Exception error) {
+                  runOnUiThread(
+                      () -> {
+                        isBusy[0] = false;
+                        update.run();
+                        if (!(error instanceof NativeQueueApi.Failure failure)) {
+                          say.accept("QueuePilot couldn't check the PIN. " + error.getMessage());
+                          return;
+                        }
+                        if (failure.status == 409) {
+                          // No PIN is set any more, so nothing is locked: just try again.
+                          dialog.dismiss();
+                          unlocked.run();
+                        } else if (failure.status == 429) {
+                          int seconds = Math.max(1, failure.body.optInt("retryAfterSeconds", 60));
+                          say.accept(
+                              "Too many wrong PINs. Wait " + seconds + " seconds, then try again.");
+                        } else if (failure.status == 403
+                            && failure.body.has("attemptsLeft")) {
+                          int left = failure.body.optInt("attemptsLeft");
+                          say.accept(
+                              "That PIN is not correct. "
+                                  + (left == 1 ? "1 try left." : left + " tries left."));
+                        } else say.accept(failure.getMessage());
+                      });
+                }
+              });
+        };
+    GridLayout keypad = new GridLayout(this);
+    keypad.setColumnCount(3);
+    keypad.setTag("tv-pin-pad");
+    LinearLayout.LayoutParams padLayout = new LinearLayout.LayoutParams(-2, -2);
+    padLayout.gravity = Gravity.CENTER_HORIZONTAL;
+    form.addView(keypad, padLayout);
+    for (String key : List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "Delete", "0", "Clear")) {
+      Runnable press =
+          () -> {
+            if (key.equals("Delete")) {
+              if (pin.length() > 0) pin.deleteCharAt(pin.length() - 1);
+            } else if (key.equals("Clear")) pin.setLength(0);
+            else if (pin.length() < 8) pin.append(key);
+            if (!isBusy[0]) say.accept("");
+            update.run();
+          };
+      TextView button =
+          key.equals("Delete")
+              ? ui.button(key, R.drawable.lucide_delete, press, false)
+              : ui.button(key, press, false);
+      button.setContentDescription(key.equals("Delete") ? "Delete digit" : key);
+      GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
+      lp.width = dp(110);
+      lp.height = dp(48);
+      lp.setMargins(dp(4), dp(4), dp(4), dp(4));
+      keypad.addView(button, lp);
+    }
+    dialog.setOnShowListener(
+        v -> {
+          dialog.setPanelSize(dp(460), -2);
+          dialog.getButton(TvPanel.BUTTON_POSITIVE).setEnabled(false);
+          dialog.getButton(TvPanel.BUTTON_POSITIVE).setOnClickListener(view -> submit.run());
+          keypad.getChildAt(0).requestFocus();
+        });
+    dialog.setOnKeyListener(
+        (d, keyCode, event) -> {
+          if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
+            if (event.getAction() == KeyEvent.ACTION_UP && pin.length() < 8 && !isBusy[0]) {
+              pin.append(keyCode - KeyEvent.KEYCODE_0);
+              say.accept("");
+              update.run();
+            }
+            return true;
+          }
+          return false;
+        });
+    dialog.show();
   }
 
   /**
@@ -2918,37 +3160,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
    * item {@code {entryKey, ratingKey, plexServer?, mode}}; earlier unwatched items stay unwatched.
    */
   private void startNativeQueue(JSONObject queue, JSONObject start) {
-    String required = queue.optString("requiredProfile");
-    JSONArray users = account.optJSONArray("users");
-    if (!required.isEmpty() && users != null) {
-      for (int i = 0; i < users.length(); i++) {
-        JSONObject user = users.optJSONObject(i);
-        if (user == null) continue;
-        if (required.equals(user.optString("title"))
-            || required.equals(user.optString("username"))) {
-          if (!userId(user).equals(activeId)) {
-            TvPanel dialog =
-                panel()
-                    .setTitle("Play as " + user.optString("title", required))
-                    .setMessage("This queue saves watch history to that Plex profile.")
-                    .setPositiveButton(
-                        "Switch and play",
-                        (d, w) -> {
-                          pendingNativeQueue = queue;
-                          pendingNativeStart = start;
-                          pendingNativeProfile = userId(user);
-                          selectUser(user);
-                        })
-                    .setNegativeButton("Cancel", null)
-                    .create();
-            dialog.show();
-            dialog.setPanelSize(dp(460), -2);
-            return;
-          }
-          break;
-        }
-      }
-    }
     if (profile == null) {
       message("Connect Plex", "Sign in with Plex before starting a queue.");
       return;
@@ -2972,6 +3183,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   if (request != generation) return;
                   nativePlan = plan;
                   nativeQueue = queue;
+                  // Remembered so a library title on the same server can name its poster too.
+                  if (!plan.optString("homeServerId").isEmpty())
+                    prefs()
+                        .edit()
+                        .putString("queue-home-server", plan.optString("homeServerId"))
+                        .apply();
                   nativeStartMode = start == null ? "" : start.optString("mode");
                   nativeIndex = plan.optInt("cursor");
                   nativeSequence = plan.optLong("sequence");
@@ -2980,10 +3197,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           } catch (Exception error) {
             runOnUiThread(
                 () -> {
-                  if (request == generation) {
-                    status.setText("This queue couldn't start.");
-                    message("Queue playback", error.getMessage());
-                  }
+                  if (request != generation) return;
+                  if (askPinIfLocked(error, () -> startNativeQueue(queue, start))) return;
+                  status.setText("This queue couldn't start.");
+                  message("Queue playback", error.getMessage());
                 });
           }
         });
@@ -3052,17 +3269,35 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     saveQueueSnapshot(item);
     int request = generation;
     String defaultOrigin = server(), defaultToken = token();
-    String serverId = item.optString("plexServer", nativePlan.optString("homeServerId"));
+    // A JSON null reads as the text "null" through optString, so test for it first.
+    String itemServer =
+        item.isNull("plexServer") || item.optString("plexServer").isEmpty()
+            ? nativePlan.optString("homeServerId")
+            : item.optString("plexServer");
+    JSONObject grant = queueGrant(nativePlan, itemServer);
+    boolean isQueueHome = itemServer.equals(nativePlan.optString("homeServerId"));
     JSONObject boundProfile = profile;
     network.execute(
         () -> {
           try {
             String origin = defaultOrigin, secret = defaultToken;
-            if (!serverId.isEmpty() && !serverId.equals(boundProfile.optString("serverId"))) {
+            if (grant != null) {
+              // THE QUEUE'S OWN PROFILE PLAYS IT. The session handed over that profile's grant
+              // for this server, so the item streams as the queue's profile, not the profile
+              // this TV has chosen for library browsing. The chosen profile's connection is
+              // reused when it is the same server; the grant's verified address otherwise.
+              secret = grant.getString("token");
+              if (!itemServer.equals(boundProfile.optString("serverId"))) {
+                origin = PlexCatalog.base(grant.getString("baseUrl"));
+                if (!ServerConnectionPolicy.allowed(origin, true, false))
+                  throw new IllegalStateException("The queued server is unavailable");
+              }
+            } else if (!itemServer.isEmpty()
+                && !itemServer.equals(boundProfile.optString("serverId"))) {
               JSONArray resources = auth.servers(boundProfile.getString("profileProof"));
               JSONObject resource = null;
               for (int i = 0; i < resources.length(); i++)
-                if (resources.getJSONObject(i).optString("clientIdentifier").equals(serverId))
+                if (resources.getJSONObject(i).optString("clientIdentifier").equals(itemServer))
                   resource = resources.getJSONObject(i);
               if (resource == null)
                 throw new IllegalStateException("This profile cannot access the queued server");
@@ -3101,10 +3336,14 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             if (entry.part().isEmpty())
               throw new IllegalStateException("This item has no direct playback source");
             String mediaOrigin = origin, mediaToken = secret;
+            byte[] artwork = nowPlayingArtwork(origin, secret, entry);
+            String artworkUri = isQueueHome ? queueThumbUri(entry) : "";
             runOnUiThread(
                 () -> {
                   if (request != generation) return;
                   playingEntry = entry;
+                  playingArtwork = artwork;
+                  playingArtworkUri = artworkUri;
                   playingOrigin = mediaOrigin;
                   playingToken = mediaToken;
                   sectionFloor = item.optLong("sectionStartMs", 0);
@@ -3132,6 +3371,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         });
   }
 
+  /**
+   * The queue profile's playback grant for {@code serverId}, from the session QueuePilot started,
+   * or null when the server sent none (an older server; the chosen profile's access is used).
+   */
+  private static JSONObject queueGrant(JSONObject plan, String serverId) {
+    JSONArray grants = plan == null ? null : plan.optJSONArray("grants");
+    for (int i = 0; grants != null && i < grants.length(); i++) {
+      JSONObject grant = grants.optJSONObject(i);
+      if (grant != null
+          && serverId.equals(grant.optString("serverId"))
+          && !grant.optString("token").isEmpty()) return grant;
+    }
+    return null;
+  }
+
   // Full queue: the whole ordered queue from QueuePilot, in the layout the server chose for its
   // content (a list for episodes, an artwork grid for movies), with tonight's lineup marked.
 
@@ -3148,7 +3402,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     if (player != null) reportPlayback("stopped");
     advancing = true;
     nativePlan = null;
-    pendingNativeQueue = null;
     String id = queue.optString("id");
     knownQueues.put(id, queue);
     isWatchedShown = false;
@@ -3206,19 +3459,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout area = ui.column();
     content.addView(area);
     if (needsQueueConnection(actions, "this queue")) return;
-    String required = QueueDetail.text(queue, "requiredProfile");
-    if (!QueueList.playsAs(required, profileName())) {
-      status.setText(
-          "This queue plays as " + required + ". Switch to that profile to see its full queue.");
-      ui.action(
-          actions,
-          "Switch profile",
-          R.drawable.lucide_arrow_left_right,
-          () -> navigate(new Screen("profiles")),
-          true);
-      focusFirst(actions.getChildAt(0));
-      return;
-    }
+    // No profile gate: the server reads every queue as the profile the queue plays as. A queue
+    // locked on the TV answers 423 until the household TV PIN is entered.
     String origin = prefs().getString("queue-origin", "");
     int request = generation;
     network.execute(
@@ -3240,6 +3482,17 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             runOnUiThread(
                 () -> {
                   if (request != generation) return;
+                  if (askPinIfLocked(error, () -> render(current))) {
+                    status.setText("This queue is locked on the TV. Enter the TV PIN to open it.");
+                    ui.action(
+                        actions,
+                        "Enter PIN",
+                        R.drawable.lucide_lock,
+                        () -> askTvPin(() -> render(current)),
+                        true);
+                    focusFirst(actions.getChildAt(0));
+                    return;
+                  }
                   status.setText("The full queue couldn't load. " + error.getMessage());
                   ui.action(
                       actions, "Try again", R.drawable.lucide_rotate_cw, () -> render(current), true);
@@ -3352,6 +3605,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   /**
    * Draws every entry and its items. Returns the view to focus: the item chosen last, or the next
    * item. The lineup line follows the last lineup item, at {@code lineup.endPosition}.
+   *
+   * <p>THE GRID IS ONE WRAPPING GRID (decision 2026-10-23, item 5). Items flow across entries into
+   * shared rows of posters, as many columns as the width and Display size allow. Only an entry
+   * with more than one item gets a heading, and only a heading or the lineup line starts a new
+   * row; the next item is marked by its own "Next" badge, not by a line that breaks the row. One
+   * poster per row was the defect: every one-movie entry drew its own heading and its own row.
+   * The list layout keeps one compact row per item, under every entry's heading.
    */
   private View drawFullQueueItems(JSONObject full, JSONObject queue, LinearLayout area) {
     area.removeAllViews();
@@ -3374,6 +3634,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     boolean isDividerPlaced = endPosition < 0;
     View focus = null, nextView = null;
     int drawn = 0;
+    LinearLayout row = null;
+    int inRow = 0;
     for (int e = 0; entries != null && e < entries.length(); e++) {
       JSONObject entry = entries.optJSONObject(e);
       JSONArray items = entry.optJSONArray("items");
@@ -3384,18 +3646,20 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         visible.add(item);
       }
       if (visible.isEmpty()) continue;
-      ui.gap(area, 22);
-      LinearLayout heading = ui.row();
-      heading.setGravity(Gravity.BOTTOM);
-      TextView name = ui.title(QueueDetail.text(entry, "title"), 20);
-      name.setTag("queue-entry");
-      heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
-      heading.addView(
-          ui.text(QueueDetail.entryNote(entry, e, entries.length()), 13, TvUi.MUTED));
-      area.addView(heading);
-      ui.gap(area, 12);
-      LinearLayout row = null;
-      int inRow = 0;
+      boolean hasHeading = !isGrid || visible.size() > 1;
+      if (hasHeading) {
+        row = null;
+        ui.gap(area, 22);
+        LinearLayout heading = ui.row();
+        heading.setGravity(Gravity.BOTTOM);
+        TextView name = ui.title(QueueDetail.text(entry, "title"), 20);
+        name.setTag("queue-entry");
+        heading.addView(name, new LinearLayout.LayoutParams(0, -2, 1));
+        heading.addView(
+            ui.text(QueueDetail.entryNote(entry, e, entries.length()), 13, TvUi.MUTED));
+        area.addView(heading);
+        ui.gap(area, 12);
+      }
       for (JSONObject item : visible) {
         int position = item.optInt("position");
         if (!isDividerPlaced && position > endPosition) {
@@ -3403,7 +3667,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           isDividerPlaced = true;
           row = null;
         }
-        if (item.optBoolean("isNext")) {
+        if (item.optBoolean("isNext") && !isGrid) {
           TextView tonight =
               ui.text("TONIGHT'S LINEUP · STARTS AT YOUR NEXT ITEM", 12, TvUi.ACCENT);
           ui.withIcon(tonight, R.drawable.lucide_play);
@@ -3416,7 +3680,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         View view = isGrid ? queueTile(item, width, open) : queueRow(item, open);
         if (isGrid) {
           if (row == null || inRow == columns) {
+            if (row == null && drawn == 0 && !hasHeading) ui.gap(area, 22);
             row = ui.row();
+            row.setTag("queue-grid-row");
             area.addView(row);
             ui.gap(area, 18);
             inRow = 0;
@@ -3438,6 +3704,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           row = null;
         }
       }
+      // A headed entry owns its rows, so whatever follows it starts below it.
+      if (hasHeading) row = null;
     }
     if (!isDividerPlaced && drawn > 0) area.addView(lineupDivider(full, lineupMs));
     if (drawn == 0)
@@ -3740,6 +4008,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             runOnUiThread(
                 () -> {
                   if (request != generation) return;
+                  if (askPinIfLocked(
+                      error, () -> markWatched(queue, entryKey, item, isWatched))) return;
                   status.setText("The change wasn't saved.");
                   message(isWatched ? "Mark watched" : "Mark unwatched", error.getMessage());
                 });
@@ -3751,7 +4021,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void history() {
     shell("History");
-    heading(profileName() + " · Watch history", "History");
+    heading("Every queue · Watch history", "History");
     status.setText("Loading your history…");
     LinearLayout actions = ui.row();
     content.addView(actions);
@@ -3764,9 +4034,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.gap(content, 16);
     TextView scope =
         ui.text(
-            "Plays on this TV, and plays in other apps when a queue tracks them. Newest first, "
-                + profileName()
-                + "'s profile only.",
+            "Plays of every queue on this TV, and plays in other apps when a queue tracks them."
+                + " Newest first.",
             14,
             TvUi.MUTED);
     ui.withIcon(scope, R.drawable.lucide_info);
@@ -3801,6 +4070,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     if (queue != null) knownQueues.put(queue.optString("id"), queue);
                   }
                   drawHistory(result, area, period, days);
+                  int hidden = result.optInt("hiddenLockedQueues");
+                  if (hidden > 0) {
+                    TextView locked =
+                        ui.button(
+                            hidden == 1
+                                ? "1 locked queue is not shown · Enter PIN"
+                                : hidden + " locked queues are not shown · Enter PIN",
+                            R.drawable.lucide_lock,
+                            () -> askTvPin(() -> render(current)),
+                            false);
+                    locked.setTag("history-locked");
+                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+                    lp.leftMargin = dp(12);
+                    actions.addView(locked, lp);
+                  }
                 });
           } catch (Exception error) {
             runOnUiThread(
@@ -4879,7 +5163,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
   }
 
-  // Add to queue: a side panel listing the Picks queues that play as this profile.
+  // Add to queue: a side panel listing every Picks queue. Each plays as its own profile.
 
   /**
    * Lists the queues a title can be added to and adds it to the chosen one. {@code isShow}
@@ -4916,38 +5200,31 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           for (int i = 0; listed != null && i < listed.length(); i++)
             if (listed.optJSONObject(i) != null) queues.add(listed.optJSONObject(i));
           QueueList.AddTargets<JSONObject> targets =
-              QueueList.addTargets(
-                  queues, q -> q.optString("kind"), q -> q.optString("requiredProfile"), profileName());
+              QueueList.addTargets(queues, q -> q.optString("kind"));
           body.removeAllViews();
           View first = null;
           for (JSONObject queue : targets.addable()) {
             String name = queue.optString("title", "Movies & Shows"), audience = queueAudience(queue);
+            boolean isLocked = queue.optBoolean("isLocked");
             TextView choice =
                 panelButton(
                     body,
                     name + " · " + audience,
-                    R.drawable.lucide_list_plus,
+                    isLocked ? R.drawable.lucide_lock : R.drawable.lucide_list_plus,
                     false,
                     () -> {
                       holder[0].dismiss();
                       postAddToQueue(queue, ratingKey, title);
                     });
             // Titles repeat, so the spoken name carries the audience as the queue cards do.
-            choice.setContentDescription("Add to " + name + ". " + audience);
+            choice.setContentDescription(
+                "Add to " + name + ". " + audience + (isLocked ? ". Locked" : ""));
             if (first == null) first = choice;
           }
-          if (targets.addable().isEmpty())
-            panelNote(body, "No Picks queue plays as " + profileName() + ".");
+          if (targets.addable().isEmpty()) panelNote(body, "There is no Picks queue yet.");
           if (targets.rules() > 0)
             panelNote(
                 body, "Rules queues choose their own titles, so they can't take a title you add.");
-          if (targets.otherProfile() > 0)
-            panelNote(
-                body,
-                targets.otherProfile() == 1
-                    ? "1 Picks queue plays as another profile. Switch profile to add to it."
-                    : targets.otherProfile()
-                        + " Picks queues play as another profile. Switch profile to add to them.");
           if (all.optBoolean("cached"))
             panelNote(body, "Saved queues · QueuePilot is unavailable, so adding may fail.");
           TextView close =
@@ -4997,6 +5274,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             runOnUiThread(
                 () -> {
                   if (request != generation) return;
+                  if (askPinIfLocked(error, () -> postAddToQueue(queue, ratingKey, title))) return;
                   status.setText("The title wasn't added.");
                   message("Add to queue", error.getMessage());
                 });
@@ -5263,6 +5541,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   @Override
   protected void onStop() {
     super.onStop();
+    // An unlock lasts until the app leaves the foreground (decision 2026-10-23). A sitting that
+    // already started keeps playing: its session key, not the unlock, authorizes it.
+    NativeQueueApi.unlockToken = "";
     if (player != null) {
       reportPlayback("paused");
       rewind.pause();

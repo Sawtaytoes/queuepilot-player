@@ -41,6 +41,23 @@ final class EpisodeLabel {
     return line.toString();
   }
 
+  /**
+   * The one-line now-playing title other devices show (the media session, and through it a Cast
+   * status a universal remote reads): "Orbit Nine · S1 E9 · The signal". Those devices print a
+   * single title line and often drop the subtitle, so the show, the number and the episode title
+   * all go in it. Anything that is not a show-named episode keeps its own title.
+   */
+  static String nowPlaying(String type, String title, String show, int season, int episode) {
+    if (!isShowNamed(type, show)) return title;
+    StringBuilder line = new StringBuilder(show.trim());
+    String number = season == 0 ? "Special" : "";
+    if (season > 0) number = "S" + season;
+    if (season != 0 && episode > 0) number = (number.isEmpty() ? "" : number + " ") + "E" + episode;
+    if (!number.isEmpty()) line.append(" · ").append(number);
+    if (title != null && !title.isBlank()) line.append(" · ").append(title.trim());
+    return line.toString();
+  }
+
   /** One spoken description for accessibility: "Orbit Nine, S1 · E9 · The signal". */
   static String spoken(String type, String title, String show, int season, int episode) {
     String first = primary(type, title, show), second = secondary(type, season, episode, title);

@@ -25,7 +25,8 @@ s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Home')
 if s.has_desc('Switch profile, Morgan'):s.click('Switch profile, Morgan');s.click('Ada');s.contains('What are we watching?')
 
 # Queues come first on Home. A people filter never hides queues silently: it says how many it
-# shows and Clear is one press. Every queue is then listed, grouped by the profile it plays as.
+# shows and Clear is one press. Every queue is then listed in one group, in the server's order.
+# Nobody switches profile to use one: each card says whom it plays as, as information only.
 everything=json.load(urllib.request.urlopen('http://127.0.0.1:9010/api/native/queues?people='))['queues']
 people=s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/state.xml').decode()
 selected=sorted(re.findall(r'<string>([a-z]+)</string>',people.split('name="queue-people"')[1].split('</set>')[0])) if 'name="queue-people"' in people else []
@@ -33,15 +34,17 @@ if selected:
     shown=json.load(urllib.request.urlopen('http://127.0.0.1:9010/api/native/queues?people='+','.join(selected)))['queues']
     wait_text('Showing %d of %d queues'%(len(shown),len(everything)));s.shot('home-queues-filtered')
     s.click('Clear')
-wait_text('Plays as Ada');wait_text('Switches profile')
+wait_text('Plays as Ada');wait_text('Plays as Grace');wait_text('Plays as Morgan')
+assert not any('Switch' in t for t in texts()),'No profile switch in front of a queue'
 assert not any(t.startswith('Showing ') for t in texts()),'No filter notice without a filter'
 for queue in everything:wait_text(queue['title'])
-# Card eyebrows are set in capitals, like every other eyebrow.
-for profile in {q['requiredProfile'] for q in everything if q['requiredProfile']!='Ada'}:wait_text('SWITCHES TO '+profile.upper())
+# Card eyebrows are set in capitals, like every other eyebrow; a locked queue says so there.
+wait_text('PICKS · LOCKED')
+assert sum(1 for n in nodes() if n.get('content-desc','').endswith('. Locked. Plays as Morgan. Play queue'))==1
 movies=[n.get('content-desc') for n in nodes() if (n.get('content-desc') or '').startswith('Movies. ')]
 assert len(movies)==sum(q['title']=='Movies' for q in everything) and len(set(movies))==len(movies),movies
 assert 'Ready when you are' not in texts() and 'Watch together' not in texts()
-assert top('Plays as Ada')<top('Continue your story'),texts()
+assert top('Plays as Ada',True)<top('Continue your story'),texts()
 s.shot('home-queues-all')
 
 # The saved queue continues first and names its queue, show and episode; Plex's own
@@ -61,4 +64,4 @@ events=json.load(urllib.request.urlopen('http://127.0.0.1:9010/_native_events'))
 assert any(e['index']==1 and e['state']=='paused' for e in events),events[-3:]
 s.back();s.contains('What are we watching?')
 assert 'FATAL EXCEPTION' not in s.adb('logcat','-d','-b','crash').decode()
-print('PASS: Home lists every queue first, grouped by the profile it plays as with its audience, says when a people filter hides queues and clears it in one press, continues the saved queue first with its show and episode, names the server on its on-deck card with the show, and the player names the show',flush=True)
+print('PASS: Home lists every queue first, in one group with its audience, whom it plays as, and its lock, says when a people filter hides queues and clears it in one press, continues the saved queue first with its show and episode, names the server on its on-deck card with the show, and the player names the show',flush=True)

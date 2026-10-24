@@ -8,22 +8,26 @@ it updates the app formerly labeled QueuePilot Lab in place.
 ## Connect your library
 
 Choose **Sign in with Plex**, open **plex.tv/link** on a phone or computer, and enter the
-four-character code displayed on the TV. The app then shows Plex Home profiles and discovers
-their servers. A single available server connects automatically; multiple servers appear as
-cards. Protected profiles use their existing Plex Home PIN. No API token, profile name, or
+four-character code displayed on the TV. The app then opens the signed-in account's own Plex
+Home profile and discovers its servers, with no profile choice. A single available server
+connects automatically; multiple servers appear as cards. The rail's avatar opens the profile
+picker, where protected profiles use their existing Plex Home PIN. No API token, profile name, or
 Plex server address needs to be entered on the television. The profile picker marks a
 protected profile **🔒 PIN** and the account owner **Owner**; other profiles carry no label.
 
 The home screen follows the approved queue-first presentation: a left navigation rail,
 queues first, continuation below, and library browsing. The rail shows icons only while
 focus is in the content and expands with labels when focus moves left onto it; Left lands on
-the selected entry, and Back from a top-level screen returns to the rail. Home lists every queue, the ones
-that play as the active profile first and those that switch profile after, each in the
-server's order. A card names its audience as text ("Ada, Grace") beside the faces, and a
-switching card names the profile it switches to. While a people filter is active, Home and
+the selected entry, and Back from a top-level screen returns to the rail. Home lists every queue in the
+server's order. A card names its audience as text ("Ada, Grace") beside the faces, and says
+whom the queue plays as ("Plays as Grace") as information only: nobody chooses a profile to
+use a queue, because QueuePilot plays each queue as the profile it names. A queue locked on the
+TV carries a lock. While a people filter is active, Home and
 Watching say "Showing N of M queues" with a one-press **Clear**. The continue cards name
 the queue or the media server they come from; an episode is named by its show, then
-"S1 · E9 · Title". The rail's avatar switches profile. D-pad focus outlines the selected
+"S1 · E9 · Title". The rail's avatar switches profile. The chosen profile is used for library browsing,
+search, title screens, a single title played outside a queue, and the server's own continue
+row; a queue always plays as its own profile. D-pad focus outlines the selected
 card. Back returns to the preceding screen. Libraries use square-cornered artwork cards,
 and configuration dialogs use bounded widths. **Explore the demo** opens a fictional
 catalog for reviewing the same native layout without an account.
@@ -34,17 +38,27 @@ The server chooses the layout from the content: a list for a queue of mostly epi
 artwork grid for a queue of mostly movies. Each item shows whether it is watched, in progress,
 or not watched, and the next item is marked. A line shows where tonight's lineup ends. The
 list opens at the next item with the watched items folded into one row; the grid keeps watched
-cards in place, dimmed. Select an item for **Start here, then continue**, **Play only this
+cards in place, dimmed, and flows the items of every entry into one wrapping grid: an entry
+gets a heading only when it holds more than one item, and the next item is marked by its own
+badge. Select an item for **Start here, then continue**, **Play only this
 item**, or **Mark watched** / **Mark unwatched**. Starting at an item never marks the earlier
 items watched. A Rules queue chooses its own order, so it lists its current lineup and offers
 no Start here. An item whose watched state the media server keeps cannot be marked from the
 TV, and its panel says so.
 
-**History** on the rail shows the profile's watching by queue, then by sitting (a queue's plays
+**History** on the rail shows every queue's watching by queue, then by sitting (a queue's plays
 less than 75 minutes apart), then what was watched in it. It includes plays in other apps only
 when a queue tracks them. A time recorded before exact times were kept reads "about". Select a
 sitting to continue its queue, play one of its items again, or open the full queue. Choose
-7, 30, 90, or 365 days.
+7, 30, 90, or 365 days. A locked queue's history is left out until the TV PIN is entered, and
+the screen says how many queues it left out.
+
+**Locked queues.** A queue marked "Locked on TV" in QueuePilot asks for the household TV PIN
+before it opens, plays, takes a title, or marks an item. The PIN is entered on a number pad with
+the D-pad or the remote's number keys. A wrong PIN says how many tries are left; after five,
+every try waits 60 seconds. A correct PIN keeps locked queues open until the app leaves the
+foreground. QueuePilot enforces the lock (`423` until `POST /api/native/unlock`), not only the
+TV, and with no PIN set nothing is locked.
 
 **Display size** in Settings scales the whole interface to 70, 80, 90, 100, 110 or 125
 percent, and applies at once. Grids gain columns at smaller sizes. The Media3 control groups
@@ -61,11 +75,11 @@ in the library it was. **Search** (on the rail, and in each library's header for
 alone) takes the on-screen keyboard, and voice when the device has a speech recognizer, and
 groups the results as Movies, Shows, and Episodes; a result opens its title screen.
 
-**Add to queue** on a title screen, and on a show's season list, lists the Picks queues that
-play as the active profile, each with its audience ("Ada, Grace"). The title goes to the top of
-the chosen queue, and a title already in it is reported, not repeated. An episode is added as
-its show. A Rules queue chooses its own titles and cannot take one, and a queue that plays as
-another profile refuses this one; the panel says both instead of offering them. This needs
+**Add to queue** on a title screen, and on a show's season list, lists every Picks queue, each
+with its audience ("Ada, Grace"); a locked queue carries a lock and asks for the TV PIN. The
+title goes to the top of the chosen queue, and a title already in it is reported, not repeated.
+An episode is added as its show. A Rules queue chooses its own titles and cannot take one; the
+panel says so instead of offering it. This needs
 QueuePilot's `POST /api/native/queues/:setId/items`.
 
 A title screen shows what Plex sends about the title: year, content rating, length or season
@@ -97,8 +111,17 @@ The interface does not claim native 4K composition on every Android TV device.
 Connect a QueuePilot server in Settings or Watching. The TV lists **Plex queues only**,
 with people portraits, the audience as text, and the existing required/optional audience
 filter. A queue starts
-inside the app using an engine-produced plan. The actual Plex Home profile must match the
-queue binding; a mismatched profile is offered an explicit switch before playback.
+inside the app using an engine-produced plan. The TV is authorized as a household device: its
+Plex profile must belong to the server owner's Plex Home, and it never has to match the queue.
+The session hands the TV the queue profile's grant for each server the queue's items live on,
+and the TV streams the queue's items with it, so a queue plays, scrobbles and records history as
+the profile the queue names, whoever is holding the remote.
+
+While anything plays, the Android media session names it in one line ("Orbit Nine · S1 E9 ·
+The signal") and carries its poster, as image bytes and, for a title on QueuePilot's own Plex
+server, as QueuePilot's tokenless poster address. Other devices that read the TV's
+now-playing status, such as a universal remote through its Cast integration, show that title and
+poster instead of an app icon. No Plex address, which would carry a token, is published.
 Native playback never sends `/api/play` or controls another app or the room.
 
 Playback sends profile-scoped Plex progress and resume history. Queue starts also preserve
@@ -167,7 +190,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.5.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.5.6.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
 without involving a household TV; `tools/tv-lab.sh test` runs them there.
 

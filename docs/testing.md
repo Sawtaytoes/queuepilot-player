@@ -54,7 +54,8 @@ blocks the browser remote. It then installs the checkout's debug APK, starts
 `tools/fixture_server.py` with `FIXTURE_ROOT`, and runs the checks: the emulator-only hierarchy
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
-`rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `library_smoke.py`, and
+`rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `household_smoke.py`,
+`library_smoke.py`, and
 `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
@@ -131,10 +132,22 @@ folded, the order of the lineup start, its end line and the following entry, the
 watched/in-progress/next badges, the Plex-history entry's refusal to mark, a watched mark and
 its reversal through `POST .../watched`, **Play only this item** and **Start here, then
 continue** with the exact `start` body sent to `POST /api/native/sessions`, the player's Full
-queue action, the grid at 100% and 125% Display size (fewer columns at 125%), the Rules
-queue's missing Start here and its reason, and the profile-switch notice. Then History:
+queue action, the grid at 100% and 125% Display size (fewer columns at 125%, and at least three
+posters from different one-film entries sharing a row at both, with no per-entry heading and no
+row-breaking next marker), the Rules queue's missing Start here and its reason, and a queue that
+plays as Grace opening with no profile switch while Ada is chosen. Then History:
 `GET /api/native/history?days=30` grouped by queue and sitting, the "about" time of a play
-recorded before exact times, the sitting panel, and the 7-day period. `rail_smoke.py` counts
+recorded before exact times, the count of locked queues left out, the sitting panel, and the
+7-day period.
+
+`household_smoke.py` follows. Each fixture queue plays as a named profile, and one is locked on
+the TV with the invented PIN 1357. With Grace chosen, it plays Ada's queue with no profile
+question and checks in the fixture's request log that the items streamed with Ada's grant from
+the session, while a library title played outside a queue used Grace's token. It reads
+`dumpsys media_session` for the one-line title ("Orbit Nine · S1 E9 · The signal") and checks
+the poster fetch. It then opens the locked queue: the number pad, four wrong PINs counting down,
+the fifth one's 60-second wait, and the right PIN playing the queue with Morgan's grant and the
+unlock header. Finally it leaves the app with Home and returns, and the PIN is asked again. `rail_smoke.py` counts
 History among the rail entries.
 
 `library_smoke.py` follows the queue and history check. The fixture's **Archive** library
@@ -146,8 +159,8 @@ check covers: title order, the count line, and a letter bar matching the first-c
 and fitting on screen; Down through more than one page with focus on the expected title in
 every row, a second page requested, and no paging buttons; a jump to M that keeps the title on
 screen while the page above arrives, and Up into it; Back from a title deep in the library
-returning focus to it; Add to queue listing only the two Picks queues that play as Ada, with the
-Rules and other-profile notes, an add and a duplicate, and the request body; each of the four
+returning focus to it; Add to queue listing every Picks queue (the locked one with its lock),
+with the Rules note, an add and a duplicate, and the request body; each of the four
 other sorts against the fixture's order, without the letter bar, with Recently added kept across
 a restart; search from the rail grouped as Movies and Episodes, an episode added as its show,
 and Back to the same results; a search within the Archive sending `sectionId=3`; and the letter

@@ -6,8 +6,6 @@ import java.util.List;
 import org.junit.Test;
 
 public class QueueListTest {
-  record Queue(String id, String requiredProfile) {}
-
   @Test
   public void audienceMatchesTheWebText() {
     assertEquals("Anybody", QueueList.audience(List.of()));
@@ -19,28 +17,10 @@ public class QueueListTest {
   }
 
   @Test
-  public void activeProfileQueuesComeFirstInServerOrder() {
-    var queues =
-        List.of(
-            new Queue("movies-kids", "Younger Kids"),
-            new Queue("movies-ada", "Ada"),
-            new Queue("anime", ""),
-            new Queue("movies-demo", "Demo"),
-            new Queue("shows-ada", "ada"));
-    var groups = QueueList.group(queues, Queue::requiredProfile, "Ada");
-    assertEquals(
-        List.of("movies-ada", "anime", "shows-ada"),
-        groups.playsAsActive().stream().map(Queue::id).toList());
-    assertEquals(
-        List.of("movies-kids", "movies-demo"),
-        groups.switchesProfile().stream().map(Queue::id).toList());
-  }
-
-  @Test
-  public void everyQueueIsKept() {
-    var queues = List.of(new Queue("a", "Ada"), new Queue("b", "Grace"), new Queue("c", null));
-    var groups = QueueList.group(queues, Queue::requiredProfile, "Grace");
-    assertEquals(3, groups.playsAsActive().size() + groups.switchesProfile().size());
+  public void playsAsIsInformationOnly() {
+    assertEquals("Plays as Grace", QueueList.playsAs("Grace"));
+    assertEquals("", QueueList.playsAs(""));
+    assertEquals("", QueueList.playsAs(null));
   }
 
   @Test
@@ -50,18 +30,18 @@ public class QueueListTest {
   }
 
   @Test
-  public void aTitleIsAddedOnlyToPicksQueuesThatPlayAsTheProfile() {
-    record Listed(String id, String kind, String requiredProfile) {}
+  public void aTitleIsAddedToEveryPicksQueueWhoeverItPlaysAs() {
+    record Listed(String id, String kind) {}
     var queues =
         List.of(
-            new Listed("ada-watch", "picks", "Ada"),
-            new Listed("movies-grace", "picks", "Grace"),
-            new Listed("anyone", "picks", ""),
-            new Listed("movies-ada", "rules", "Ada"));
-    var targets = QueueList.addTargets(queues, Listed::kind, Listed::requiredProfile, "ada");
+            new Listed("ada-watch", "picks"),
+            new Listed("movies-grace", "picks"),
+            new Listed("anyone", "picks"),
+            new Listed("movies-ada", "rules"));
+    var targets = QueueList.addTargets(queues, Listed::kind);
     assertEquals(
-        List.of("ada-watch", "anyone"), targets.addable().stream().map(Listed::id).toList());
+        List.of("ada-watch", "movies-grace", "anyone"),
+        targets.addable().stream().map(Listed::id).toList());
     assertEquals(1, targets.rules());
-    assertEquals(1, targets.otherProfile());
   }
 }

@@ -39,4 +39,18 @@ public class EpisodeLabelTest {
     assertEquals("The signal", EpisodeLabel.primary("episode", "The signal", ""));
     assertEquals("The signal", EpisodeLabel.spoken("episode", "The signal", "", 1, 9));
   }
+
+  @Test
+  public void nowPlayingNamesTheShowNumberAndEpisodeInOneLine() {
+    assertEquals(
+        "Orbit Nine · S1 E9 · The signal",
+        EpisodeLabel.nowPlaying("episode", "The signal", "Orbit Nine", 1, 9));
+    assertEquals(
+        "Orbit Nine · Special · A day between stars",
+        EpisodeLabel.nowPlaying("episode", "A day between stars", "Orbit Nine", 0, 1));
+    assertEquals(
+        "Orbit Nine · E4 · Drift",
+        EpisodeLabel.nowPlaying("episode", "Drift", "Orbit Nine", EpisodeLabel.UNKNOWN, 4));
+    assertEquals("Glass City", EpisodeLabel.nowPlaying("movie", "Glass City", "", -1, -1));
+  }
 }

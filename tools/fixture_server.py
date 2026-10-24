@@ -138,7 +138,13 @@ def full_queues():
             _entry('wild-current','Wild Current · The river crossing','movie','queue',[wild])]},
         'friends-watch':{'setId':'friends-watch','kind':'picks','layout':'grid','isWholeQueue':True,'isLineupShuffled':False,'lineup':{'count':2,'endPosition':3},'isTruncated':False,'entries':[
             _entry('friday-films','Friday films','collection','queue',[_film(0,303,'watched'),_film(1,304,'watched'),_film(2,302,'in_progress',4440000,0,True),_film(3,305,lineup=1)]),
-            _entry('lantern-pictures','Lantern Pictures','collection','queue',[_film(4+i,k) for i,k in enumerate([306,307,308,309,310,311,301])])]},
+            # Seven one-film entries. One poster per row was the defect: each one-item entry drew
+            # its own heading and its own row. They must share rows with each other now.
+            *[_entry(f'lantern-{k}','Lantern Pictures · '+next(t for f,t,_ in FILMS if f==k),'movie','queue',[_film(4+i,k)]) for i,k in enumerate([306,307,308,309,310,311,301])]]},
+        'movies-grace':{'setId':'movies-grace','kind':'picks','layout':'grid','isWholeQueue':True,'isLineupShuffled':False,'lineup':{'count':4,'endPosition':3},'isTruncated':False,'entries':[
+            _entry(f'grace-{k}','Grace picks · '+next(t for f,t,_ in FILMS if f==k),'movie','queue',[_film(i,k,lineup=i,next_=i==0)]) for i,k in enumerate([302,303,304,305])]},
+        'movies-family':{'setId':'movies-family','kind':'picks','layout':'grid','isWholeQueue':True,'isLineupShuffled':False,'lineup':{'count':1,'endPosition':0},'isTruncated':False,'entries':[
+            _entry(f'family-{k}','Family night · '+next(t for f,t,_ in FILMS if f==k),'movie','queue',[_film(i,k,lineup=0 if i==0 else None,next_=i==0)]) for i,k in enumerate([306,307,308])]},
         'movies-ada':{'setId':'movies-ada','kind':'rules','layout':'grid','isWholeQueue':False,'isLineupShuffled':True,'lineup':{'count':3,'endPosition':2},'isTruncated':False,'entries':[
             _entry(None,'Movies','lineup','provider',[_film(0,307,lineup=0,next_=True,owned=False),_film(1,308,lineup=1,owned=False),_film(2,309,lineup=2,owned=False)])]},
     }
@@ -166,7 +172,26 @@ def history(days):
     since=now-days*86400000
     for queue in queues:queue['sittings']=[x for x in queue['sittings'] if x['startedAt']>=since]
     return {'profile':{'uuid':'ada','name':'Ada'},'sittingGapMinutes':75,'since':since,'queues':[q for q in queues if q['sittings']]}
-def is_native_profile(handler):return handler.headers.get('X-Plex-Profile-Token') in ('fixture-user-ada','fixture-root')
+# THE TV IS A HOUSEHOLD DEVICE. Any profile token of the fixture's Plex Home may use every queue;
+# a queue plays as the profile it names (PLAYS_AS), whoever is signed in. Anything else is 403.
+HOUSEHOLD=('fixture-root','fixture-user-ada','fixture-user-grace','fixture-user-morgan')
+PLAYS_AS={'ada-watch':'Ada','movies-grace':'Grace','friends-watch':'Ada','movies-ada':'Ada','movies-family':'Morgan'}
+def is_native_profile(handler):return handler.headers.get('X-Plex-Profile-Token') in HOUSEHOLD
+# "Locked on TV": the household TV PIN opens it. Unlocks are bound to the device that asked.
+TV_PIN='1357';LOCKED={'movies-family'}
+unlocks={};unlock_state={'wrong':0,'until':0.0};native_calls=[]
+def is_unlocked(handler):
+    token=handler.headers.get('X-QueuePilot-Unlock','')
+    return bool(token) and unlocks.get(token)==handler.headers.get('X-QueuePilot-Device','')
+def refuse_locked(handler,set_id):
+    if set_id in LOCKED and not is_unlocked(handler):
+        handler.respond(json.dumps({'error':'This queue is locked. Enter the TV PIN to open it.','isLocked':True}),'application/json',423);return True
+    return False
+def note_call(handler,path):
+    native_calls.append({'path':path,'proof':handler.headers.get('X-Plex-Profile-Token',''),'device':handler.headers.get('X-QueuePilot-Device',''),'hasUnlock':bool(handler.headers.get('X-QueuePilot-Unlock',''))})
+def grants(set_id):
+    # The queue profile's server-scoped grant, as the real server hands it with a new session.
+    return [{'serverId':'fixture-server','baseUrl':'http://10.0.2.2:9010','token':'fixture-'+PLAYS_AS.get(set_id,'Ada').lower()}]
 
 users = [{'id':1,'uuid':'ada','title':'Ada','protected':False,'admin':True,'thumb':'/avatars/ada.jpg'}, {'id':2,'uuid':'grace','title':'Grace','protected':False,'thumb':'/avatars/grace.jpg'}, {'id':3,'uuid':'morgan','title':'Morgan','protected':True,'thumb':'/avatars/nadia.jpg'}]
 
@@ -184,7 +209,8 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
         if path=='/_markers': markers=True;self.respond('ok');return
         if path=='/_online': video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
-        if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();queue_adds.clear();self.respond('ok');return
+        if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();queue_adds.clear();unlocks.clear();native_calls.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
+        if path=='/_unlock_reset':unlocks.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
         if path=='/_cloud_offline': cloud_offline=True;self.respond('ok');return
         if path=='/_expire_next': expire_next=True;self.respond('ok');return
@@ -195,11 +221,28 @@ class Handler(BaseHTTPRequestHandler):
         if path.startswith('/api/native/'):
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
             value=json.loads(body or '{}')
+            note_call(self,path)
+            if path=='/api/native/unlock':
+                if not is_native_profile(self):self.respond(json.dumps({'error':'This TV is not signed in to this Plex Home'}),'application/json',403);return
+                device=self.headers.get('X-QueuePilot-Device','')
+                if len(device)<8:self.respond(json.dumps({'error':"Send X-QueuePilot-Device with this TV's identifier"}),'application/json',400);return
+                now=time.monotonic()
+                if now<unlock_state['until']:self.respond(json.dumps({'error':'Too many wrong PINs. Wait, then try again.','retryAfterSeconds':int(unlock_state['until']-now)+1}),'application/json',429);return
+                if value.get('pin')!=TV_PIN:
+                    unlock_state['wrong']+=1
+                    if unlock_state['wrong']>=5:
+                        unlock_state.update(wrong=0,until=now+60)
+                        self.respond(json.dumps({'error':'Too many wrong PINs. Wait, then try again.','retryAfterSeconds':60}),'application/json',429);return
+                    left=5-unlock_state['wrong']
+                    self.respond(json.dumps({'error':f'That PIN is not correct. {left} tries left.','attemptsLeft':left}),'application/json',403);return
+                unlock_state['wrong']=0;token='fixture-unlock-'+str(len(unlocks)+1);unlocks[token]=device
+                self.respond(json.dumps({'unlockToken':token,'expiresAt':int(time.time()*1000)+4*3600000}),'application/json');return
             if path.startswith('/api/native/queues/') and path.endswith('/items'):
-                if not is_native_profile(self):self.respond(json.dumps({'error':'This queue plays as another profile. Switch Plex profile first.'}),'application/json',403);return
+                if not is_native_profile(self):self.respond(json.dumps({'error':'This TV is not signed in to this Plex Home'}),'application/json',403);return
                 set_id=path.split('/')[4]
+                if refuse_locked(self,set_id):return
                 if set_id=='movies-ada':self.respond(json.dumps({'error':'A Rules queue chooses its own titles. Add this to a Picks queue.'}),'application/json',409);return
-                if set_id not in ('ada-watch','friends-watch'):self.respond(json.dumps({'error':'This queue plays as another profile. Switch Plex profile first.'}),'application/json',403);return
+                if set_id not in PLAYS_AS:self.respond(json.dumps({'error':'Unknown queue'}),'application/json',404);return
                 key=str(value.get('ratingKey','')).strip();kind=addable_title(key)
                 if kind is None:self.respond(json.dumps({'error':'That title is not available to this profile'}),'application/json',404);return
                 if kind=='episode':self.respond(json.dumps({'error':'Only a movie or a show can be added to a queue'}),'application/json',400);return
@@ -207,8 +250,10 @@ class Handler(BaseHTTPRequestHandler):
                 queue_adds.append({'setId':set_id,'ratingKey':key,'plexServer':value.get('plexServer'),'added':not duplicate})
                 self.respond(json.dumps({'added':not duplicate,'key':'rk:'+key,**({'duplicateOf':'rk:'+key} if duplicate else {}),'title':key}),'application/json');return
             if path.startswith('/api/native/queues/') and path.endswith('/watched'):
-                if not is_native_profile(self):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
-                set_id=path.split('/')[4];full=full_queue(set_id)
+                if not is_native_profile(self):self.respond(json.dumps({'error':'This TV is not signed in to this Plex Home'}),'application/json',403);return
+                set_id=path.split('/')[4]
+                if refuse_locked(self,set_id):return
+                full=full_queue(set_id)
                 if not full:self.respond(json.dumps({'error':'Unknown queue'}),'application/json',404);return
                 entry=next((e for e in full['entries'] if e['entryKey']==value.get('entryKey')),None)
                 if not entry or not any(i['ratingKey']==value.get('ratingKey') for i in entry['items']):self.respond(json.dumps({'error':'Unknown item'}),'application/json',404);return
@@ -216,7 +261,9 @@ class Handler(BaseHTTPRequestHandler):
                 queue_marks[(set_id,value['ratingKey'])]=bool(value.get('isWatched'))
                 self.respond(json.dumps({'entryKey':value['entryKey'],'ratingKey':value['ratingKey'],'state':'watched' if value.get('isWatched') else 'unwatched'}),'application/json');return
             if path=='/api/native/sessions':
-                if self.headers.get('X-Plex-Profile-Token') not in ('fixture-user-ada','fixture-root'):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
+                if not is_native_profile(self):self.respond(json.dumps({'error':'This TV is not signed in to this Plex Home'}),'application/json',403);return
+                if refuse_locked(self,value.get('setId')):return
+                plays_as=PLAYS_AS.get(value.get('setId'),'Ada')
                 start=value.get('start')
                 if start is not None:
                     full=full_queue(value['setId'])
@@ -227,11 +274,11 @@ class Handler(BaseHTTPRequestHandler):
                     native_starts.append({'setId':value['setId'],'start':start})
                     chosen=[picked]+([i for i in entry['items'] if i['position']>picked['position'] and i['state']!='watched'] if start.get('mode')=='continue' else [])
                     ident='native-fixture-'+str(len(native_sessions)+1)
-                    plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':'ada','profileName':'Ada','homeServerId':'fixture-server','sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':len(chosen),'handed':len(chosen),
+                    plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':plays_as.lower(),'profileName':plays_as,'homeServerId':'fixture-server','grants':grants(value['setId']),'sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':len(chosen),'handed':len(chosen),
                         'items':[{'ratingKey':i['ratingKey'],'positionKey':f"{n}:home:{i['ratingKey']}",'resumeMs':0,'type':i['type'],'title':i['title'],'show':i['show'],'season':i['season'],'episode':i['episode']} for n,i in enumerate(chosen)]}
                     native_sessions[ident]=plan;self.respond(json.dumps(plan),'application/json');return
                 ident='native-fixture-'+str(len(native_sessions)+1)
-                plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':'ada','profileName':'Ada','homeServerId':'fixture-server','sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':2,'handed':2,'items':[{'ratingKey':'102','positionKey':'0:home:102','resumeMs':4000,'type':'episode','title':'The signal','show':'Orbit Nine','season':1,'episode':9},{'ratingKey':'103','positionKey':'1:home:103','resumeMs':0,'type':'episode','title':'The return','show':'Harbor Lights','season':2,'episode':3}]}
+                plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':plays_as.lower(),'profileName':plays_as,'homeServerId':'fixture-server','grants':grants(value['setId']),'sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':2,'handed':2,'items':[{'ratingKey':'102','positionKey':'0:home:102','resumeMs':4000,'type':'episode','title':'The signal','show':'Orbit Nine','season':1,'episode':9},{'ratingKey':'103','positionKey':'1:home:103','resumeMs':0,'type':'episode','title':'The return','show':'Harbor Lights','season':2,'episode':3}]}
                 plan['cursor']=native_resume.get(value['setId'],0)
                 native_sessions[ident]=plan;self.respond(json.dumps(plan),'application/json');return
             ident=path.split('/')[4];plan=native_sessions.get(ident)
@@ -266,20 +313,26 @@ class Handler(BaseHTTPRequestHandler):
         parsed=urlparse(self.path); path=parsed.path
         if path=='/_native_events':self.respond(json.dumps(native_events),'application/json');return
         if path=='/_native_starts':self.respond(json.dumps(native_starts),'application/json');return
+        if path=='/_native_calls':self.respond(json.dumps(native_calls),'application/json');return
         if path=='/_history_requests':self.respond(json.dumps(history_requests),'application/json');return
         if path=='/_queue_adds':self.respond(json.dumps(queue_adds),'application/json');return
         if path=='/_queue_marks':self.respond(json.dumps([{'setId':k[0],'ratingKey':k[1],'isWatched':v} for k,v in queue_marks.items()]),'application/json');return
         if path.startswith('/api/native/queues/') and path.endswith('/full'):
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
-            if not is_native_profile(self):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
+            note_call(self,path)
+            if not is_native_profile(self):self.respond(json.dumps({'error':'This TV is not signed in to this Plex Home'}),'application/json',403);return
+            if refuse_locked(self,path.split('/')[4]):return
             full=full_queue(path.split('/')[4])
-            if not full:self.respond(json.dumps({'error':'This queue plays as another profile'}),'application/json',403);return
+            if not full:self.respond(json.dumps({'error':'Unknown queue'}),'application/json',404);return
             self.respond(json.dumps(full),'application/json');return
         if path=='/api/native/history':
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
-            if not is_native_profile(self):self.respond(json.dumps({'error':'Switch to the queue profile'}),'application/json',403);return
+            note_call(self,path)
+            if not is_native_profile(self):self.respond(json.dumps({'error':'This TV is not signed in to this Plex Home'}),'application/json',403);return
             days=max(1,min(365,int(parse_qs(parsed.query).get('days',['30'])[0])))
-            history_requests.append({'days':days});self.respond(json.dumps(history(days)),'application/json');return
+            # Every queue's history; a locked queue without an unlock is left out and counted.
+            found=history(days);found['hiddenLockedQueues']=0 if is_unlocked(self) else len(LOCKED)
+            history_requests.append({'days':days});self.respond(json.dumps(found),'application/json');return
         if path.startswith('/avatars/') or (path.startswith('/api/native/people/') and path.endswith('/avatar')):
             name=path.split('/')[-2] if path.endswith('/avatar') else path.split('/')[-1].removesuffix('.jpg')
             self.respond((ROOT/(name+'.jpg')).read_bytes(),'image/jpeg');return
@@ -287,7 +340,9 @@ class Handler(BaseHTTPRequestHandler):
             if native_offline:self.respond(json.dumps({'error':'QueuePilot is unavailable'}),'application/json',503);return
             selected=set(parse_qs(parsed.query).get('people',[''])[0].split(','))- {''}
             # Titles repeat, as they do on a real server; people and the Plex profile tell them apart.
-            queues=[{'id':'ada-watch','title':'Movies & Shows','kind':'picks','people':['ada'],'requiredProfile':'Ada'},{'id':'movies-grace','title':'Movies','kind':'picks','people':['grace'],'requiredProfile':'Grace'},{'id':'friends-watch','title':'Movies & Shows · 2','kind':'picks','people':['ada','grace'],'requiredProfile':'Ada'},{'id':'movies-ada','title':'Movies','kind':'rules','people':['ada'],'requiredProfile':'Ada'},{'id':'movies-family','title':'Movies','kind':'picks','people':['ada','grace'],'requiredProfile':'Morgan'}]
+            names={'ada':'Ada','grace':'Grace'}
+            queues=[{'id':'ada-watch','title':'Movies & Shows','kind':'picks','people':['ada']},{'id':'movies-grace','title':'Movies','kind':'picks','people':['grace']},{'id':'friends-watch','title':'Movies & Shows · 2','kind':'picks','people':['ada','grace']},{'id':'movies-ada','title':'Movies','kind':'rules','people':['ada']},{'id':'movies-family','title':'Movies','kind':'picks','people':['ada','grace']}]
+            for q in queues:q.update(audience=', '.join(names[p] for p in q['people']),playsAs=PLAYS_AS[q['id']],isLocked=q['id'] in LOCKED)
             if selected:queues=[q for q in queues if selected.issubset(set(q['people'])) and 'ada' in selected]
             self.respond(json.dumps({'queues':queues,'people':[{'id':'ada','displayName':'Ada'},{'id':'grace','displayName':'Grace'}]}),'application/json');return
         if path.startswith('/api/v2/'):
