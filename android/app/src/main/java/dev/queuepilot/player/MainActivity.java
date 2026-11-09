@@ -54,6 +54,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private JSONObject account = new JSONObject(), profile;
   private String activeId = "demo-ada";
   private PlexAccount auth;
+  private String deviceName = DeviceName.FALLBACK;
   private LinearLayout content;
   private TextView status;
   private ExoPlayer player;
@@ -178,7 +179,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       clientId = UUID.randomUUID().toString();
       prefs().edit().putString("plex-client-id", clientId).apply();
     }
-    auth = new PlexAccount(clientId, fixture);
+    deviceName = DeviceName.read(this);
+    auth = new PlexAccount(clientId, deviceName, fixture);
     NativeQueueApi.deviceId = clientId;
     try {
       profiles = store.read();
@@ -5390,6 +5392,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                       + duration
                       + "&X-Plex-Client-Identifier="
                       + PlexAccount.encode(client)
+                      + "&X-Plex-Device-Name="
+                      + PlexAccount.encode(deviceName)
                       + "&X-Plex-Product=QueuePilot%20TV&X-Plex-Platform=Android";
               PlexCatalog.get(PlexCatalog.url(origin, path), secret, 1024 * 1024);
             } catch (Exception ignored) {

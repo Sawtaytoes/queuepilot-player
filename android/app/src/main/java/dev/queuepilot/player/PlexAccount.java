@@ -11,9 +11,11 @@ import org.json.JSONObject;
 final class PlexAccount {
   private final String origin;
   private final String clientId;
+  private final String deviceName;
 
-  PlexAccount(String clientId, boolean fixture) {
+  PlexAccount(String clientId, String deviceName, boolean fixture) {
     this.clientId = clientId;
+    this.deviceName = deviceName;
     origin = fixture ? "http://10.0.2.2:9010" : "https://plex.tv";
   }
 
@@ -39,7 +41,7 @@ final class PlexAccount {
     connection.setRequestProperty("X-Plex-Version", "0.2.0");
     connection.setRequestProperty("X-Plex-Platform", "Android");
     connection.setRequestProperty("X-Plex-Device", "Android TV");
-    connection.setRequestProperty("X-Plex-Device-Name", "QueuePilot TV");
+    connection.setRequestProperty("X-Plex-Device-Name", deviceName);
     if (!token.isEmpty()) connection.setRequestProperty("X-Plex-Token", token);
     try {
       if (method.equals("POST")) {
