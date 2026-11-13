@@ -39,9 +39,16 @@ ledgers decide progress. Authored section boundaries have their own completion s
 Playback length and previously handed identities limit continuation. No ADB, Companion or
 room power command is involved.
 
-Pending native events are encrypted with Android Keystore and retried in order. Browse
-snapshots and audience selection are cached. A snapshot cannot mint a new plan offline.
-Expired or invalid pending grants are retained as failed records for later review. Active
+Pending native events are encrypted with Android Keystore and retried in order
+(`PendingEvents.java`). The outbox is read and written off the main thread, one change at a
+time. It is bounded: a progress report (`playing` or `paused`) replaces a waiting report of the
+same state for the same item and session, keeping that report's age and error count, and at
+most 200 events wait, the oldest dropped first. One sender runs at a time in the process. A 4xx answer other than 408 and 429 means the session is refused; its events are kept as
+failed records for later review and are never sent again or with other credentials. An event
+that QueuePilot answers with a server error 20 times, or that still fails after the 24-hour
+session lifetime, is kept the same way; an unreachable server is retried until then. Failed
+records keep only each session's latest event, for the last 20 sessions. Browse
+snapshots and audience selection are cached. A snapshot cannot mint a new plan offline. Active
 lineup restoration across app termination and a viewer-facing failed-event recovery flow
 remain future work. Direct library progress currently has no durable offline retry.
 

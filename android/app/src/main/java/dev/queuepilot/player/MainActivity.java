@@ -69,6 +69,20 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private int nativeIndex;
   private long nativeSequence;
   private final ExecutorService progressNetwork = Executors.newSingleThreadExecutor();
+
+  /**
+   * Adds playback events to the encrypted outbox, one at a time and in the order they happened, so
+   * the main thread never encrypts or writes it. One for the process, never shut down: a recreated
+   * activity's events still follow the ones its predecessor reported. Sending runs on {@link
+   * #progressNetwork}, and {@link PendingEvents#drain} keeps one sender at a time.
+   */
+  private static final ExecutorService eventStore = Executors.newSingleThreadExecutor();
+
+  private final java.util.concurrent.atomic.AtomicBoolean isFlushQueued =
+      new java.util.concurrent.atomic.AtomicBoolean();
+
+  /** One outbox for the process, so a recreated activity never holds a stale copy. */
+  private static PendingEvents sharedPendingEvents;
   private PlexCatalog.Entry playingEntry;
   private boolean isCastLoading;
   private TextView skipButton;
@@ -140,7 +154,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     super.onCreate(state);
     ui = new TvUi(this);
     store = new ProfileStore(this);
-    progressNetwork.execute(this::flushNativeEvents);
+    scheduleFlush();
     getOnBackPressedDispatcher()
         .addCallback(
             this,
@@ -5332,6 +5346,15 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private void reportPlayback(String state) {
+    reportPlayback(state, !PendingEvents.isProgressTick(state));
+  }
+
+  /**
+   * Reports playback. A queue's events go to the encrypted outbox and are sent in order; {@code
+   * isDurable} writes the outbox to disk before sending, for an event that may be the last before
+   * the process ends.
+   */
+  private void reportPlayback(String state, boolean isDurable) {
     if (player == null || playingEntry == null) return;
     long position = Math.max(0, player.getCurrentPosition()),
         duration = Math.max(0, player.getDuration());
@@ -5355,23 +5378,17 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                 .put("sessionKey", plan.getString("sessionKey"))
                 .put("profileProof", plan.optString("profileProof"))
                 .put("event", event);
-        synchronized (store) {
-          JSONArray pending = store.nativeEvents();
-          if (pending.length() > 0) {
-            JSONObject last = pending.optJSONObject(pending.length() - 1);
-            JSONObject previous = last == null ? null : last.optJSONObject("event");
-            if (previous != null
-                && last.optString("sessionId").equals(envelope.optString("sessionId"))
-                && previous.optInt("index") == nativeIndex
-                && state.equals("playing")
-                && previous.optString("state").equals("playing"))
-              pending.remove(pending.length() - 1);
-          }
-          pending.put(envelope);
-          store.nativeEvents(pending);
-        }
-        progressNetwork.execute(this::flushNativeEvents);
+        eventStore.execute(
+            () -> {
+              try {
+                pendingEvents().add(envelope, isDurable);
+              } catch (Exception ignored) {
+                // The outbox could not be read or written; the event cannot be kept.
+              }
+              scheduleFlush();
+            });
       } catch (Exception ignored) {
+        // Includes a report after onDestroy shut the executors down.
       }
     } else {
       String client = prefs().getString("plex-client-id", "");
@@ -5402,71 +5419,101 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
   }
 
-  private void flushNativeEvents() {
-    for (int attempt = 0; attempt < 4000; attempt++) {
-      JSONObject first = null;
-      try {
-        synchronized (store) {
-          JSONArray pending = store.nativeEvents();
-          for (int i = 0; i < pending.length(); i++) {
-            JSONObject candidate = pending.getJSONObject(i);
-            if (!candidate.has("failed")) {
-              first = candidate;
-              break;
-            }
-          }
-          if (first == null) return;
-        }
-        JSONObject event = first.getJSONObject("event");
-        NativeQueueApi.request(
-            first.getString("origin"),
-            "/api/native/sessions/" + first.getString("sessionId") + "/events",
-            event,
-            "X-Native-Session-Key",
-            first.getString("sessionKey"),
-            first.optString("profileProof"));
-        synchronized (store) {
-          JSONArray pending = store.nativeEvents();
-          JSONArray remaining = new JSONArray();
-          for (int i = 0; i < pending.length(); i++) {
-            JSONObject record = pending.getJSONObject(i);
-            if (!record.getJSONObject("event").optString("id").equals(event.getString("id")))
-              remaining.put(record);
-          }
-          store.nativeEvents(remaining);
-        }
-      } catch (Exception error) {
-        if (first != null
-            && error instanceof NativeQueueApi.Failure
-            && Set.of(400, 403, 409).contains(((NativeQueueApi.Failure) error).status)) {
-          try {
-            synchronized (store) {
-              JSONArray pending = store.nativeEvents();
-              for (int i = 0; i < pending.length(); i++) {
-                JSONObject record = pending.getJSONObject(i);
-                if (record.optString("sessionId").equals(first.optString("sessionId")))
-                  record.put("failed", error.getMessage());
-              }
-              store.nativeEvents(pending);
-            }
-          } catch (Exception ignored) {
-          }
-          runOnUiThread(
-              () -> {
-                if (player != null && status != null)
-                  status.setText(
-                      "Some saved history needs review. Its playback session is no longer valid.");
-              });
-          continue;
-        }
-        runOnUiThread(
-            () -> {
-              if (player != null && status != null)
-                status.setText("Progress is saved locally and waiting to sync.");
-            });
-        return;
+  private PendingEvents pendingEvents() {
+    synchronized (MainActivity.class) {
+      if (sharedPendingEvents == null) {
+        ProfileStore secrets = new ProfileStore(getApplicationContext());
+        sharedPendingEvents =
+            new PendingEvents(
+                new PendingEvents.Storage() {
+                  @Override
+                  public String load() throws Exception {
+                    return secrets.nativeEvents();
+                  }
+
+                  @Override
+                  public void save(String json, boolean isDurable) throws Exception {
+                    secrets.nativeEvents(json, isDurable);
+                  }
+                },
+                System::currentTimeMillis);
       }
+      return sharedPendingEvents;
     }
+  }
+
+  /** Sends the outbox soon. A send already waiting to start covers this request. */
+  private void scheduleFlush() {
+    if (!isFlushQueued.compareAndSet(false, true)) return;
+    try {
+      progressNetwork.execute(
+          () -> {
+            isFlushQueued.set(false);
+            flushNativeEvents();
+          });
+    } catch (java.util.concurrent.RejectedExecutionException closed) {
+      // onDestroy shut the sender down; the next start sends the outbox.
+      isFlushQueued.set(false);
+    }
+  }
+
+  /** Waits until every event reported so far is in the outbox. */
+  private void awaitQueuedEvents() {
+    try {
+      eventStore.submit(() -> {}).get();
+    } catch (Exception interrupted) {
+      // The sender is stopping; the next start sends what is saved.
+    }
+  }
+
+  /**
+   * Waits on the main thread, at most {@code 1 s}, for the events just reported to reach the disk.
+   * Only for leaving the screen: Android may end a stopped app's process at any time after.
+   */
+  private void awaitSavedEvents() {
+    try {
+      eventStore.submit(() -> {}).get(1, java.util.concurrent.TimeUnit.SECONDS);
+    } catch (Exception slow) {
+      // The write continues in the background.
+    }
+  }
+
+  /** Sends the outbox in order. Runs on {@link #progressNetwork}. */
+  private void flushNativeEvents() {
+    // A continuation or a new session must follow the events reported before it, such as the
+    // "ended" that advances the server's cursor.
+    awaitQueuedEvents();
+    PendingEvents.Drained drained;
+    try {
+      drained =
+          pendingEvents()
+              .drain(
+                  record ->
+                      NativeQueueApi.request(
+                          record.optString("origin"),
+                          "/api/native/sessions/" + record.optString("sessionId") + "/events",
+                          record.optJSONObject("event"),
+                          "X-Native-Session-Key",
+                          record.optString("sessionKey"),
+                          record.optString("profileProof")),
+                  error ->
+                      error instanceof NativeQueueApi.Failure
+                          ? ((NativeQueueApi.Failure) error).status
+                          : 0);
+    } catch (Exception unreadable) {
+      return;
+    }
+    String message =
+        drained.isWaiting
+            ? "Progress is saved locally and waiting to sync."
+            : drained.isRejected
+                ? "Some saved history needs review. Its playback session is no longer valid."
+                : null;
+    if (message != null)
+      runOnUiThread(
+          () -> {
+            if (player != null && status != null) status.setText(message);
+          });
   }
 
   // Add to queue: a side panel listing every Picks queue. Each plays as its own profile.
@@ -5858,7 +5905,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     // already started keeps playing: its session key, not the unlock, authorizes it.
     NativeQueueApi.unlockToken = "";
     if (player != null) {
-      reportPlayback("paused");
+      // Durable, and waited for: Android may end a stopped app's process at any time after this.
+      reportPlayback("paused", true);
+      awaitSavedEvents();
       rewind.pause();
       player.pause();
     }
@@ -5870,7 +5919,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     generation++;
     handler.removeCallbacksAndMessages(null);
     releasePlayer();
+    awaitSavedEvents();
     network.shutdownNow();
+    // A sender still running finishes its request. The outbox executor belongs to the process.
     progressNetwork.shutdown();
     if (networkCallback != null) {
       try {

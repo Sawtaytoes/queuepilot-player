@@ -58,6 +58,14 @@ assert focused,'Rewind must be reachable with the D-pad'
 s.shot('native-rounded-controls')
 s.post('_native_offline');s.adb('shell','input','keyevent','126');time.sleep(.5);s.adb('shell','input','keyevent','127');time.sleep(1)
 s.contains('Progress is saved locally');encrypted=s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/secrets.xml').decode();assert 'native-events' in encrypted and 'fixture-session-key' not in encrypted
+def outbox_size():
+    secrets=s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/secrets.xml').decode()
+    return len(re.search(r'<string name="native-events">([^<]*)</string>',secrets).group(1))
+# A paused TV reports every 10 seconds. While QueuePilot is unreachable, each report must replace
+# the waiting paused report instead of adding one (a report is about 700 encrypted characters).
+before=outbox_size();time.sleep(25);after=outbox_size()
+print('Offline outbox while paused:',before,'->',after,'characters',flush=True)
+assert after-before<300,'Paused progress reports must not pile up in the outbox'
 s.post('_online');s.adb('shell','input','keyevent','126');time.sleep(.5);s.adb('shell','input','keyevent','127');time.sleep(1)
 s.click('Next queue item');time.sleep(3);s.adb('shell','input','keyevent','127');s.contains('S2 · E3 · The return');s.contains('Harbor Lights');s.shot('native-next-item');wait_for(lambda:any(e['index']==1 for e in events()))
 # An episode's own guest credit comes first; the show's matching credit is not repeated.

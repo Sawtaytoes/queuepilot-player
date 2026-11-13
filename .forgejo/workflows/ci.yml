@@ -1,0 +1,63 @@
+# ⚠️ Actions resolve from **data.forgejo.org, not github.com**: that is the
+# runner's configured default. Check
+# `https://data.forgejo.org/api/v1/repos/actions/<name>/tags` before bumping.
+#
+# The Android build runs in a Docker container started from the job, with the
+# repository passed in through `tar` on stdin: a job container's workspace path
+# is not a path the host's Docker can mount. The emulator checks are not here;
+# they run in the QueuePilot Test environment (README.md, Build and test).
+name: CI
+
+on:
+  # A push to a topic branch is covered by its pull_request run.
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One run per ref; the newest wins.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The base image of tools/Dockerfile, pinned to the same digest.
+  JDK_IMAGE: eclipse-temurin:21-jdk-jammy@sha256:e0c60c487345d1dc9d0fc7b6f0496f3cc941e5132e09296cc17a6decc71b902b
+
+jobs:
+  # Decide whether this change is documentation only. Every gate below turns
+  # itself off with `if:` when it is: skipped, not absent, so the status
+  # contexts still post.
+  #
+  # IMPORTED from Charcuterie's Forgejo pull mirror, never from github.com: a
+  # cross-host import is dropped SILENTLY and the run still reports success.
+  changes:
+    uses: sawtaytoes/charcuterie/.github/workflows/shared-docs-only-changes.yml@workflows-v1
+
+  # The one gate a docs-only change DOES run: the decision records the pull
+  # request touched, never the whole tree.
+  docs:
+    uses: sawtaytoes/charcuterie/.github/workflows/shared-docs-lint.yml@workflows-v1
+    with:
+      # The linter runs from a checkout, and `actions/checkout` resolves a bare
+      # `owner/repo` against THIS host, so name the mirror.
+      charcuterieRepository: sawtaytoes/charcuterie
+
+  # Unit tests, Android lint, and assembleDebug (tools/ci-build.sh), plus the
+  # theme check, which needs no emulator.
+  android:
+    needs: [changes]
+    if: ${{ needs.changes.outputs.isDocsOnly != 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - name: Theme check
+        run: python3 tools/theme_check.py
+      - name: Unit tests, lint, and assembleDebug
+        # The build container gets the same bounds as tools/build.sh. The
+        # named volume keeps the SDK, Gradle, and its dependencies between runs.
+        run: |
+          tar -cf - --exclude=.git . | docker run --rm -i --cpus 2 --memory 6g \
+            -v queuepilot-player-ci:/cache --entrypoint /bin/bash "$JDK_IMAGE" \
+            -ec 'mkdir -p /source && tar -xf - -C /source && bash /source/tools/ci-build.sh /source'

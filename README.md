@@ -139,8 +139,11 @@ Native playback never sends `/api/play` or controls another app or the room.
 
 Playback sends profile-scoped Plex progress and resume history. Queue starts also preserve
 QueuePilot-owned history and authored section boundaries. Pending native progress is encrypted
-locally and retried in order; invalid or expired grants are retained for review rather than
-silently borrowing owner privileges. Queue snapshots and the people filter survive restart;
+locally and retried in order, off the main thread. Repeated progress reports of the same state
+keep only the latest, and at most 200 events wait. A session that QueuePilot refuses, and an
+event that fails 20 times with a server error or for longer than a session lasts (24 hours), is
+retained for review as its latest event, for the last 20 such sessions, rather than silently
+borrowing owner privileges. Queue snapshots and the people filter survive restart;
 starting a new queue still requires the server. An active lineup is not restored after a crash.
 
 The Cast overlay shows available portraits, actor names and roles from Plex metadata.
@@ -190,7 +193,9 @@ Build the Docker toolchain with `docker build -t queuepilot-player-build:0.1 too
 ./tools/build.sh /absolute/path/to/queuepilot-player /absolute/path/to/build-cache
 ```
 
-The build runs unit tests, lint, and `assembleDebug`. Preserve the cache's `android`
+The build runs unit tests, lint, and `assembleDebug`. CI (`.forgejo/workflows/ci.yml`) runs the
+same three, without the native ASS library, and `tools/theme_check.py` on every pull request
+that changes more than documentation. Preserve the cache's `android`
 directory so test updates retain their signing key. The APK is
 `android/app/build/outputs/apk/debug/app-debug.apk`.
 
@@ -203,7 +208,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.8.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.5.9.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
 without involving a household TV; `tools/tv-lab.sh test` runs them there.
 

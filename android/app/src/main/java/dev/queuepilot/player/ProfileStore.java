@@ -48,15 +48,20 @@ final class ProfileStore {
   }
 
   void account(JSONObject account) throws Exception {
-    writeSecret("account", account.toString());
+    writeSecret("account", account.toString(), true);
   }
 
-  JSONArray nativeEvents() throws Exception {
-    return new JSONArray(readSecret("native-events", "[]"));
+  /** The pending native playback events as a JSON array; see {@link PendingEvents}. */
+  String nativeEvents() throws Exception {
+    return readSecret("native-events", "[]");
   }
 
-  void nativeEvents(JSONArray events) throws Exception {
-    writeSecret("native-events", events.toString());
+  /**
+   * Saves the pending native playback events. Call it off the main thread: it encrypts the whole
+   * outbox. {@code isDurable} waits for the disk; see {@link #writeSecret}.
+   */
+  void nativeEvents(String events, boolean isDurable) throws Exception {
+    writeSecret("native-events", events, isDurable);
   }
 
   private String readSecret(String name, String fallback) throws Exception {
@@ -74,10 +79,20 @@ final class ProfileStore {
   }
 
   void write(JSONArray profiles) throws Exception {
-    writeSecret("profiles", profiles.toString());
+    writeSecret("profiles", profiles.toString(), true);
   }
 
-  private void writeSecret(String name, String value) throws Exception {
+  /**
+   * Encrypts and stores one value.
+   *
+   * <p>{@code isDurable} uses {@code commit()}, which returns only after the disk write and reports
+   * whether it succeeded. Credentials and the profile roster need that: sign-in tells the viewer
+   * when they could not be saved. A playback event that may be the last before the process ends
+   * (stopped, ended, or the pause when the app leaves the screen) needs it too, because an {@code
+   * apply()} still waiting when Android kills the process is lost. Everything else uses {@code
+   * apply()}: the value is visible at once and reaches the disk in the background.
+   */
+  private void writeSecret(String name, String value, boolean isDurable) throws Exception {
     Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
     cipher.init(Cipher.ENCRYPT_MODE, key());
     byte[] ciphertext = cipher.doFinal(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -85,10 +100,12 @@ final class ProfileStore {
         new JSONObject()
             .put("iv", Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP))
             .put("ciphertext", Base64.encodeToString(ciphertext, Base64.NO_WRAP));
-    if (!context
-        .getSharedPreferences("secrets", Context.MODE_PRIVATE)
-        .edit()
-        .putString(name, envelope.toString())
-        .commit()) throw new IllegalStateException("Profile storage failed");
+    android.content.SharedPreferences.Editor editor =
+        context
+            .getSharedPreferences("secrets", Context.MODE_PRIVATE)
+            .edit()
+            .putString(name, envelope.toString());
+    if (!isDurable) editor.apply();
+    else if (!editor.commit()) throw new IllegalStateException("Profile storage failed");
   }
 }
