@@ -142,6 +142,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   @Override
   public void onCreate(Bundle state) {
     super.onCreate(state);
+    DebugChecks.install(this);
     ui = new TvUi(this);
     store = new ProfileStore(this);
     scheduleFlush();
@@ -1162,20 +1163,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   void loadArt(ImageView view, String thumb, int width) {
-    if (thumb.isEmpty()) return;
     int request = generation;
-    String origin = server(), secret = token();
-    network.execute(
-        () -> {
-          try {
-            Bitmap image = artwork(origin, secret, thumb, width);
-            runOnUiThread(
-                () -> {
-                  if (request == generation) view.setImageBitmap(image);
-                });
-          } catch (Exception ignored) {
-          }
-        });
+    ArtworkLoader.load(view, server(), token(), thumb, width, () -> request == generation);
   }
 
   private void details(PlexCatalog.Entry entry) {

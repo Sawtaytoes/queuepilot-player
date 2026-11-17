@@ -119,7 +119,9 @@ to local private IP addresses.
 
 The player opens supported files directly with Media3, reports decoded video dimensions,
 and offers a Cast overlay. Artwork cards request a 720-pixel derivative; title artwork
-requests 1440 pixels. The detail screen can compare actual 240px and 1440px responses.
+requests 1440 pixels. Each picture is decoded no larger than the view that shows it, on its own
+background threads, and the most recent 32 MB of decoded artwork stays in memory, so Back draws a
+screen's pictures at once. The detail screen can compare actual 240px and 1440px responses.
 The interface does not claim native 4K composition on every Android TV device.
 
 Connect a QueuePilot server in Settings or Watching. The TV lists **Plex queues only**,
@@ -266,6 +268,8 @@ The disposable emulator fixture checks code authorization, cancellation, expiry,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
 See [test environment](docs/testing.md) and [verification](docs/verification-0.6.0.md).
+`tools/perf_probe.py` measures start time, frames, memory, and main-thread work in the
+emulator; see [performance](docs/performance-2026-11.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
 without involving a household TV; `tools/tv-lab.sh test` runs them there.
 

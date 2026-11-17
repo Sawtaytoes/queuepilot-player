@@ -238,6 +238,27 @@ setting); and a queue that plays as Grace saving its choice with Grace's grant w
 chosen. Every check that presses Play on
 the episode now answers the resume question.
 
+## Performance probe
+
+`tools/perf_probe.py` measures start time, frame timing, memory, and StrictMode findings in the
+shared emulator, and compares builds in one run. Results and their limits are in
+[performance](performance-2026-11.md).
+
+```sh
+queuepilot-test run --source /source/.worktrees/<branch> --label '<branch> perf' -- \
+  python3 -u /source/.worktrees/<branch>/tools/perf_probe.py \
+    --apk before=/source/.worktrees/<branch>/<saved main APK> \
+    --apk after=/source/.worktrees/<branch>/android/app/build/outputs/apk/debug/app-debug.apk --strict
+```
+
+Each `--apk` is installed over the app in turn (both must be signed with the same debug key) and
+measured the same way; the results go to `/fixtures/perf-<label>.json`, and a table compares them.
+`--quick` takes two starts of each kind and skips the 50-row memory reading. `--strict-only` signs
+in and runs only the StrictMode pass, keeping the raw log in `/fixtures/perf-strictmode.txt`.
+StrictMode is on only for a debuggable build on the emulator launched with `--ez strict-mode true`
+(`DebugChecks.java`): the preview APKs that TVs run are debuggable too. The probe signs in from a
+clean app, so run it through `queuepilot-test run`, which restores the person's session.
+
 ## Lucide icons
 
 The app's icons are Lucide icons converted to Android vector drawables. `tools/lucide/icons.txt`
