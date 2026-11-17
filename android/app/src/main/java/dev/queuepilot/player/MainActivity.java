@@ -42,17 +42,17 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
    * wakes, the app can open before Android has a default network; the first request then fails
    * and the screen keeps asking until QueuePilot answers (see {@link #loadLiveQueueLists}).
    */
-  private LiveQueueRetry queueRetry;
+  QueueLoader.LiveQueueRetry queueRetry;
 
-  private android.net.ConnectivityManager.NetworkCallback networkCallback;
+  android.net.ConnectivityManager.NetworkCallback networkCallback;
   final Deque<Screen> history = new ArrayDeque<>();
   private final Map<Screen, String> focusMemory = new HashMap<>();
-  private final StoryOrder demo = StoryOrder.demo();
+  final StoryOrder demo = StoryOrder.demo();
   TvUi ui;
   ProfileStore store;
   JSONArray profiles = new JSONArray();
   JSONObject account = new JSONObject(), profile;
-  private String activeId = "demo-ada";
+  String activeId = "demo-ada";
   PlexAccount auth;
   private String deviceName = DeviceName.FALLBACK;
   LinearLayout content;
@@ -62,9 +62,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private PlayerView playerView;
   private androidx.media3.session.MediaSession mediaSession;
   volatile int generation;
-  private int mainWidth;
+  int mainWidth;
   private boolean fixture;
-  private Screen current;
+  Screen current;
   private JSONObject nativePlan;
   private int nativeIndex;
   private long nativeSequence;
@@ -101,10 +101,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private final Set<TvPanel> panels = new HashSet<>();
   private final RewindOnResume rewind = new RewindOnResume();
   /** The catalog entry of the queue being played, saved with the profile's resume snapshot. */
-  private JSONObject nativeQueue;
-  private JSONArray queuePeople = new JSONArray();
+  JSONObject nativeQueue;
+  JSONArray queuePeople = new JSONArray();
   /** Every queue the catalog has listed, by id, so a full queue or history can start one. */
-  private final Map<String, JSONObject> knownQueues = new HashMap<>();
+  final Map<String, JSONObject> knownQueues = new HashMap<>();
   /** "continue" or "only" when the playing session began at a chosen item, else empty. */
   private String nativeStartMode = "";
   /** The full queue's watched items are folded into one row until the viewer shows them. */
@@ -126,11 +126,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   /** Columns for a grid that has {@code baseline} columns at 100%. */
-  private int columns(int baseline) {
+  int columns(int baseline) {
     return DisplaySize.columns(baseline, displayPercent());
   }
 
-  private int itemWidth(int columns) {
+  int itemWidth(int columns) {
     return DisplaySize.itemWidth(mainWidth, columns, 14);
   }
 
@@ -187,7 +187,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     } catch (Exception e) {
       Toast.makeText(this, "Please sign in again to restore access.", Toast.LENGTH_LONG).show();
     }
-    watchDefaultNetwork();
+    queueLoader.watchDefaultNetwork();
     setProfile(prefs().getString("active", "demo-ada"));
     if (profile != null || prefs().getBoolean("preview", false)) home();
     else if (!account.optString("token").isEmpty()) profilePicker.openOwnProfile();
@@ -209,7 +209,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     prefs().edit().putString("active", activeId).apply();
   }
 
-  private String profileName() {
+  String profileName() {
     return profile == null
         ? (activeId.equals("demo-grace") ? "Grace" : "Ada")
         : profile.optString("name");
@@ -223,7 +223,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return profile == null ? "" : profile.optString("token");
   }
 
-  private Set<String> completed() {
+  Set<String> completed() {
     return new HashSet<>(prefs().getStringSet("done:" + activeId, Set.of()));
   }
 
@@ -269,12 +269,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       case "settings" -> settings();
       case "library" -> load(screen.path(), screen.title());
       case "details" -> details(screen.entry());
-      case "demo" -> demoSeason();
-      case "queues" -> queues();
+      case "demo" -> demoCatalog.demoSeason();
+      case "queues" -> watchingScreen.queues();
       case "fullqueue" -> fullQueue(screen.path(), screen.title());
       case "history" -> history();
       case "search" -> search(screen);
-      default -> drawHome();
+      default -> homeScreen.drawHome();
     }
   }
 
@@ -573,682 +573,26 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   final SignInScreen signInScreen = new SignInScreen(this);
 
-  private void drawHome() {
-    shell("Home");
-    heading(
-        profile == null ? "DEMO · " + profileName() : "Welcome, " + profileName(),
-        "What are we watching?");
-    status.setText("Your people. Your queues. Your library.");
-    LinearLayout cards = horizontal();
-    int width = (mainWidth - 48) / 3;
-    if (profile == null) {
-      StoryOrder.Item next = demo.next(completed());
-      cards.addView(
-          ui.card(
-              profileName() + " · Watching",
-              "Ready when you are",
-              next == null
-                  ? "You have finished this demo sequence."
-                  : "Next: Orbit Nine · " + next.label(),
-              "View demo queue",
-              () -> navigate(new Screen("demo")),
-              width));
-      cards.addView(
-          ui.card(
-              "Watching together",
-              "Watch together",
-              "Shared queues will use the QueuePilot engine's audience rules.",
-              "Explore shared queues",
-              () -> navigate(new Screen("queues")),
-              width));
-      cards.addView(
-          ui.card(
-              "Your library",
-              "Make yourself at home",
-              "Connect Plex with a code from your phone. Your library is discovered automatically.",
-              "Sign in with Plex",
-              () -> navigate(new Screen("signin")),
-              width));
-    } else {
-      cards.addView(
-          ui.card(
-              "Your library",
-              "Browse something new",
-              profile.optString("serverName", "Your media server"),
-              "Browse library",
-              () -> navigate(new Screen("library", "/library/sections", "Your library", null)),
-              width));
-      homeQueueCards(cards, width);
-    }
-    if (profile == null || prefs().getString("queue-origin", "").isEmpty()) {
-      ui.primaryCard(cards.getChildAt(0));
-      focusFirst(cards.getChildAt(0));
-    }
-    section("Continue your story");
-    if (profile == null) {
-      demoHero();
-      section("Browse your library");
-      demoPosters();
-    } else {
-      JSONObject snapshot = queueSnapshot();
-      if (snapshot != null) {
-        content.addView(queueHero(snapshot));
-        ui.gap(content, 16);
-      }
-      LinearLayout continuation = ui.column();
-      content.addView(continuation);
-      TextView loading = ui.text("Finding your next episode…", 16, TvUi.MUTED);
-      continuation.addView(loading);
-      fetch(
-          "/library/onDeck",
-          (entries, cached) -> {
-            continuation.removeAllViews();
-            if (entries.length() == 0)
-              continuation.addView(
-                  ui.text("Choose a title below to start watching.", 16, TvUi.MUTED));
-            else
-              continuation.addView(mediaHero(PlexCatalog.Entry.fromJson(entries.optJSONObject(0))));
-          },
-          () ->
-              loading.setText(
-                  "Continue watching is unavailable. You can still browse your libraries below."));
-      section("Browse your library");
-      LinearLayout libraries = horizontal();
-      fetch(
-          "/library/sections",
-          (entries, cached) -> {
-            for (int i = 0; i < entries.length(); i++) {
-              PlexCatalog.Entry entry = PlexCatalog.Entry.fromJson(entries.optJSONObject(i));
-              libraries.addView(
-                  ui.card(
-                      "Library",
-                      entry.title(),
-                      "Browse titles on " + profile.optString("serverName", "your server") + ".",
-                      "Open library",
-                      () -> navigate(new Screen("library", entry.children(), entry.title(), null)),
-                      Math.min(250, (mainWidth - 48) / 3)));
-            }
-          },
-          () ->
-              libraries.addView(
-                  ui.text("Server unavailable. Try again from Series or Movies.", 15, TvUi.MUTED)));
-    }
-  }
+  final HomeScreen homeScreen = new HomeScreen(this);
 
-  /**
-   * Queues come first on Home: every queue, grouped by the profile it plays as, each with its
-   * audience as text. Without a QueuePilot connection a single card offers to connect one.
-   */
-  private void homeQueueCards(LinearLayout cards, int width) {
-    String origin = prefs().getString("queue-origin", "");
-    if (origin.isEmpty()) {
-      cards.addView(
-          ui.card(
-              "QueuePilot",
-              "Connect your queues",
-              "Your QueuePilot watching queues will appear here.",
-              "Connect QueuePilot",
-              () -> navigate(new Screen("queues")),
-              width),
-          0);
-      return;
-    }
-    int request = generation;
-    // The rows are added where the placeholder sits, above Continue and the library rows.
-    LinearLayout queueArea = ui.column();
-    ViewGroup cardsParent = (ViewGroup) cards.getParent();
-    ViewGroup outer = (ViewGroup) cardsParent.getParent();
-    outer.addView(queueArea, outer.indexOfChild(cardsParent));
-    TextView loading = ui.text("Finding your queues…", 15, TvUi.MUTED);
-    queueArea.addView(loading);
-    // A live answer that follows saved queues replaces them. Focus moves with it only when it
-    // was on the replaced cards, on the card this method focused, or nowhere: a viewer who has
-    // moved on to the library or the rail keeps their place.
-    View[] placed = new View[1];
-    loadLiveQueueLists(
-        origin,
-        (all, shown) -> {
-          if (request != generation) return;
-          // Decided before the old cards go: removing a focused card moves focus elsewhere.
-          boolean isFocusOurs = isFocusOurs(placed[0], queueArea);
-          queueArea.removeAllViews();
-          View first = renderQueueGroups(queueArea, all, shown, origin, true);
-          if (first == null) first = cards.getChildAt(0);
-          if (isFocusOurs) {
-            placed[0] = first;
-            focusFirst(first);
-          }
-        },
-        error -> {
-          if (request != generation) return;
-          boolean isFocusOurs = isFocusOurs(placed[0], queueArea);
-          if (loading.getParent() == null) {
-            queueArea.removeAllViews();
-            queueArea.addView(loading);
-          }
-          loading.setText("QueuePilot couldn't be reached. Your library is still here.");
-          ui.primaryCard(cards.getChildAt(0));
-          if (isFocusOurs) {
-            placed[0] = cards.getChildAt(0);
-            focusFirst(placed[0]);
-          }
-        });
-  }
+  final QueueLoader queueLoader = new QueueLoader(this);
 
-  /**
-   * True on the first answer (placed is null), or when focus is nowhere, on the view this screen
-   * placed it on, or inside {@code area}. A viewer who moved on keeps their place.
-   */
-  private boolean isFocusOurs(View placed, ViewGroup area) {
-    if (placed == null) return true;
-    View focused = getWindow().getDecorView().findFocus();
-    return focused == null || focused == placed || isWithin(focused, area);
-  }
+  final QueueCards queueCards = new QueueCards(this);
 
-  private static boolean isWithin(View view, ViewGroup parent) {
-    for (View v = view; v != null; v = v.getParent() instanceof View ? (View) v.getParent() : null)
-      if (v == parent) return true;
-    return false;
-  }
-
-  /**
-   * Like {@link #loadQueueLists}, but a screen that got the saved copy, or nothing, keeps asking
-   * for the live list: after a short backoff ({@link QueueList#liveRetryDelayMs}), as soon as
-   * Android reports a new default network, and when the app resumes. {@code loaded} runs again
-   * with the live answer. Leaving the screen cancels the retry.
-   */
-  private void loadLiveQueueLists(
-      String origin,
-      java.util.function.BiConsumer<JSONObject, JSONObject> loaded,
-      java.util.function.Consumer<Exception> failed) {
-    attemptLiveQueueLists(new LiveQueueRetry(origin, loaded, failed, generation));
-  }
-
-  private void attemptLiveQueueLists(LiveQueueRetry retry) {
-    loadQueueLists(
-        retry.origin,
-        (all, shown) -> {
-          if (retry.request != generation) return;
-          String state = all.optBoolean("cached") ? "saved" : "live";
-          if (state.equals("saved")) armQueueRetry(retry);
-          else if (!retry.state.isEmpty()) android.util.Log.i(QUEUE_LOG, "Live queues after a retry");
-          // The same saved copy again is not drawn again: that would move a viewer's focus.
-          if (state.equals("saved") && state.equals(retry.state)) return;
-          retry.state = state;
-          retry.loaded.accept(all, shown);
-        },
-        error -> {
-          if (retry.request != generation) return;
-          android.util.Log.w(QUEUE_LOG, "Queue list and its saved copy unavailable", error);
-          armQueueRetry(retry);
-          if ("failed".equals(retry.state)) return;
-          retry.state = "failed";
-          retry.failed.accept(error);
-        });
-  }
-
-  private void armQueueRetry(LiveQueueRetry retry) {
-    if (queueRetry != null) handler.removeCallbacks(queueRetry);
-    queueRetry = retry;
-    long delay = QueueList.liveRetryDelayMs(retry.attempt);
-    retry.attempt++;
-    if (delay >= 0) handler.postDelayed(retry, delay);
-    android.util.Log.i(
-        QUEUE_LOG,
-        "Queues not live; retry "
-            + (delay >= 0 ? "in " + delay + " ms" : "on a new network or a resume"));
-  }
-
-  /** A new default network or a resume asks at once, and starts the backoff again. */
-  private void retryQueuesNow(String reason) {
-    LiveQueueRetry retry = queueRetry;
-    if (retry == null || retry.request != generation) return;
-    android.util.Log.i(QUEUE_LOG, "Live queue retry now: " + reason);
-    retry.attempt = 0;
-    handler.removeCallbacks(retry);
-    retry.run();
-  }
-
-  /** One screen's pending request for the live queue list. */
-  private final class LiveQueueRetry implements Runnable {
-    final String origin;
-    final java.util.function.BiConsumer<JSONObject, JSONObject> loaded;
-    final java.util.function.Consumer<Exception> failed;
-    final int request;
-    int attempt;
-    /** What the screen shows: "" before the first answer, then "saved", "failed", or "live". */
-    String state = "";
-
-    LiveQueueRetry(
-        String origin,
-        java.util.function.BiConsumer<JSONObject, JSONObject> loaded,
-        java.util.function.Consumer<Exception> failed,
-        int request) {
-      this.origin = origin;
-      this.loaded = loaded;
-      this.failed = failed;
-      this.request = request;
-    }
-
-    @Override
-    public void run() {
-      if (queueRetry != this) return;
-      queueRetry = null;
-      if (request == generation) attemptLiveQueueLists(this);
-    }
-  }
-
-  /**
-   * Saved queues ask again the moment Android has a default network. At boot the emulator's
-   * Wi-Fi connected 23 s after the app opened, and the first request had failed with
-   * "ConnectException: Failed to connect" in that gap.
-   */
-  private void watchDefaultNetwork() {
-    try {
-      android.net.ConnectivityManager connectivity =
-          getSystemService(android.net.ConnectivityManager.class);
-      if (connectivity == null) return;
-      networkCallback =
-          new android.net.ConnectivityManager.NetworkCallback() {
-            @Override
-            public void onAvailable(android.net.Network network) {
-              runOnUiThread(() -> retryQueuesNow("network available"));
-            }
-          };
-      connectivity.registerDefaultNetworkCallback(networkCallback);
-    } catch (RuntimeException e) {
-      networkCallback = null;
-      android.util.Log.w(QUEUE_LOG, "No network callback; saved queues retry on a timer", e);
-    }
-  }
-
-  /**
-   * Loads every queue, and the filtered list too when a people filter is active, so the screen
-   * can say how many queues the filter hides.
-   */
-  private void loadQueueLists(
-      String origin,
-      java.util.function.BiConsumer<JSONObject, JSONObject> loaded,
-      java.util.function.Consumer<Exception> failed) {
-    Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
-    fetchQueues(
-        origin,
-        Set.of(),
-        all -> {
-          queuePeople = all.optJSONArray("people");
-          if (queuePeople == null) queuePeople = new JSONArray();
-          if (selected.isEmpty()) loaded.accept(all, all);
-          else fetchQueues(origin, selected, shown -> loaded.accept(all, shown), failed);
-        },
-        failed);
-  }
-
-  /**
-   * Draws the filter notice and every queue. Home uses scrolling rows; Watching uses a
-   * grid. Returns the first queue card, or null when no queue is shown.
-   */
-  private View renderQueueGroups(
-      LinearLayout area, JSONObject all, JSONObject shown, String origin, boolean isRow) {
-    JSONArray allQueues = all.optJSONArray("queues"), shownQueues = shown.optJSONArray("queues");
-    int total = allQueues == null ? 0 : allQueues.length();
-    int count = shownQueues == null ? 0 : shownQueues.length();
-    for (int i = 0; i < total; i++) {
-      JSONObject queue = allQueues.optJSONObject(i);
-      if (queue != null) knownQueues.put(queue.optString("id"), queue);
-    }
-    if (shown != all) {
-      LinearLayout notice = ui.row();
-      notice.setGravity(Gravity.CENTER_VERTICAL);
-      TextView summary = ui.text(QueueList.filterSummary(count, total), 15, TvUi.WHITE);
-      summary.setTag("queue-filter-summary");
-      summary.setPadding(0, 0, dp(14), 0);
-      notice.addView(summary);
-      notice.addView(
-          ui.button(
-              "Clear",
-              () -> {
-                prefs().edit().remove("queue-people").apply();
-                render(current);
-              },
-              false));
-      area.addView(notice);
-      ui.gap(area, 14);
-    }
-    if (all.optBoolean("cached")) {
-      area.addView(ui.text("Saved queues · reconnect to start playback", 14, TvUi.MUTED));
-      ui.gap(area, 10);
-    }
-    List<JSONObject> list = new ArrayList<>();
-    for (int i = 0; i < count; i++) {
-      JSONObject queue = shownQueues.optJSONObject(i);
-      if (queue != null) list.add(queue);
-    }
-    // EVERY QUEUE, IN THE SERVER'S ORDER, AS ONE GROUP. Nobody switches profile to use a queue:
-    // the server plays each as the profile it names, which each card states as information.
-    View first = null;
-    int columns = columns(3), width = itemWidth(columns);
-    LinearLayout row = null;
-    for (int i = 0; i < list.size(); i++) {
-      if (row == null || (!isRow && i % columns == 0)) {
-        if (isRow) {
-          HorizontalScrollView scroll = new HorizontalScrollView(this);
-          scroll.setHorizontalScrollBarEnabled(false);
-          scroll.setClipToPadding(false);
-          row = ui.row();
-          row.setPadding(dp(3), dp(3), dp(3), dp(3));
-          scroll.addView(row);
-          area.addView(scroll);
-        } else {
-          row = ui.row();
-          area.addView(row);
-        }
-        ui.gap(area, 18);
-      }
-      LinearLayout card = queueCard(list.get(i), width, origin);
-      row.addView(withFullQueue(card, list.get(i)));
-      if (first == null) {
-        first = card;
-        ui.primaryCard(card);
-      }
-    }
-    if (count == 0)
-      area.addView(
-          ui.text(
-              total == 0
-                  ? "No queues yet. Create one in QueuePilot."
-                  : "No queues match these people. Choose Clear to show all " + total + ".",
-              17,
-              TvUi.MUTED));
-    return first;
-  }
-
-  /** A queue card with its "Full queue" action beneath it, as one column in a row or grid. */
-  private View withFullQueue(LinearLayout card, JSONObject queue) {
-    LinearLayout column = ui.column();
-    column.setLayoutParams(card.getLayoutParams());
-    column.addView(card, new LinearLayout.LayoutParams(-1, -2));
-    TextView full = fullQueueButton(queue);
-    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-    lp.topMargin = dp(8);
-    column.addView(full, lp);
-    return column;
-  }
-
-  private TextView fullQueueButton(JSONObject queue) {
-    TextView full =
-        ui.button("Full queue", R.drawable.lucide_list_ordered, () -> openFullQueue(queue), false);
-    // Titles repeat, so the spoken name carries the audience as the card does.
-    full.setContentDescription(
-        "Full queue. "
-            + queue.optString("title", "Movies & Shows")
-            + (queue.has("people") ? ". " + queueAudience(queue) : ""));
-    return full;
-  }
-
-  private LinearLayout queueCard(JSONObject queue, int width, String origin) {
-    String kind = queue.optString("kind").equals("rules") ? "Rules" : "Picks";
-    boolean isLocked = queue.optBoolean("isLocked");
-    LinearLayout card =
-        ui.card(
-            isLocked ? kind + " · Locked" : kind,
-            isLocked
-                ? R.drawable.lucide_lock
-                : kind.equals("Rules") ? R.drawable.lucide_list_filter : R.drawable.lucide_sparkles,
-            queue.optString("title", "Movies & Shows"),
-            queueAudience(queue),
-            "Play queue",
-            () -> startNativeQueue(queue),
-            width);
-    if (isLocked) card.setTag("queue-locked");
-    // Whom the queue plays as is information only: it never asks anybody to switch profile.
-    String playsAs = QueueList.playsAs(queue.optString("playsAs"));
-    if (!playsAs.isEmpty()) {
-      TextView line = ui.text(playsAs, 13, TvUi.MUTED);
-      line.setTag("queue-plays-as");
-      line.setPadding(0, 0, 0, dp(10));
-      View action = card.findViewWithTag("card-action");
-      card.addView(line, card.indexOfChild(action));
-    }
-    LinearLayout faces = ui.row();
-    JSONArray people = queue.optJSONArray("people");
-    if (people != null)
-      for (int j = 0; j < Math.min(4, people.length()); j++) {
-        ImageView face = avatar(36);
-        faces.addView(face);
-        loadQueueAvatar(face, people.optString(j), origin);
-      }
-    card.addView(faces, 1);
-    // Titles repeat, so the spoken name carries the audience and the profile too.
-    card.setContentDescription(
-        queue.optString("title", "Movies & Shows")
-            + ". "
-            + queueAudience(queue)
-            + ". "
-            + kind
-            + (isLocked ? ". Locked" : "")
-            + (playsAs.isEmpty() ? "" : ". " + playsAs)
-            + ". Play queue");
-    return card;
-  }
-
-  /** Reads the queue list, falling back to the last saved copy when QueuePilot is unreachable. */
-  private void fetchQueues(
-      String origin,
-      Set<String> selected,
-      java.util.function.Consumer<JSONObject> loaded,
-      java.util.function.Consumer<Exception> failed) {
-    network.execute(
-        () -> {
-          try {
-            String path =
-                "/api/native/queues?people="
-                    + PlexAccount.encode(String.join(",", new TreeSet<>(selected)));
-            JSONObject response;
-            try {
-              response = NativeQueueApi.request(origin, path, null, "", "");
-              java.nio.file.Files.write(
-                  cacheFile("native-tv", origin, path).toPath(),
-                  response.toString().getBytes(StandardCharsets.UTF_8));
-            } catch (Exception offline) {
-              android.util.Log.w(QUEUE_LOG, "Queue list failed, showing the saved copy: " + path, offline);
-              response =
-                  new JSONObject(
-                      new String(
-                          java.nio.file.Files.readAllBytes(
-                              cacheFile("native-tv", origin, path).toPath()),
-                          StandardCharsets.UTF_8));
-              response.put("cached", true);
-            }
-            JSONObject result = response;
-            runOnUiThread(() -> loaded.accept(result));
-          } catch (Exception error) {
-            runOnUiThread(() -> failed.accept(error));
-          }
-        });
-  }
-
-  private String snapshotKey() {
-    return "queue-snapshot:" + activeId;
-  }
-
-  /** The last queue this profile played and the item it was on, or null. */
-  private JSONObject queueSnapshot() {
-    try {
-      String saved = prefs().getString(snapshotKey(), "");
-      if (saved.isEmpty()) return null;
-      JSONObject snapshot = new JSONObject(saved);
-      return snapshot.optJSONObject("queue") == null || snapshot.optJSONObject("item") == null
-          ? null
-          : snapshot;
-    } catch (Exception e) {
-      return null;
-    }
-  }
-
-  private void saveQueueSnapshot(JSONObject item) {
-    if (nativeQueue == null || item == null) return;
-    try {
-      JSONObject saved = new JSONObject();
-      for (String key : new String[] {"ratingKey", "type", "title", "show", "season", "episode"})
-        if (item.has(key)) saved.put(key, item.get(key));
-      prefs()
-          .edit()
-          .putString(
-              snapshotKey(),
-              new JSONObject().put("queue", nativeQueue).put("item", saved).toString())
-          .apply();
-    } catch (Exception ignored) {
-    }
-  }
-
-  /**
-   * Continues the profile's last queue. It names the queue and the item it was on. Resuming starts
-   * a QueuePilot session, so it needs the QueuePilot server; the card says so rather than imply an
-   * offline resume.
-   */
-  private View queueHero(JSONObject snapshot) {
-    JSONObject queue = snapshot.optJSONObject("queue"), item = snapshot.optJSONObject("item");
-    String type = item.optString("type", "episode"), title = item.optString("title");
-    String show = item.optString("show");
-    int season = item.isNull("season") ? EpisodeLabel.UNKNOWN : item.optInt("season", -1);
-    int episode = item.isNull("episode") ? 0 : item.optInt("episode", 0);
-    LinearLayout hero = ui.column();
-    hero.setPadding(dp(24), dp(20), dp(24), dp(20));
-    hero.setBackground(ui.shape(TvTheme.ACCENT_SURFACE, 0, 12));
-    hero.addView(ui.text(queue.optString("title", "QueuePilot queue"), 13, TvUi.ACCENT));
-    ui.gap(hero, 12);
-    hero.addView(ui.title(EpisodeLabel.primary(type, title, show), 29));
-    String line = EpisodeLabel.secondary(type, season, episode, title);
-    if (!line.isEmpty()) {
-      ui.gap(hero, 10);
-      hero.addView(ui.text(line, 16, TvUi.WHITE));
-    }
-    ui.gap(hero, 10);
-    hero.addView(
-        ui.text(
-            "Where this queue left off. Resuming asks your QueuePilot server for the queue.",
-            14,
-            TvUi.MUTED));
-    ui.gap(hero, 14);
-    TextView resume =
-        ui.button("Resume queue", R.drawable.lucide_play, () -> startNativeQueue(queue), true);
-    resume.setContentDescription(
-        "Resume queue. "
-            + queue.optString("title")
-            + ". "
-            + EpisodeLabel.spoken(type, title, show, season, episode));
-    LinearLayout actions = ui.row();
-    actions.addView(resume);
-    TextView full = fullQueueButton(queue);
-    LinearLayout.LayoutParams fullGap = new LinearLayout.LayoutParams(-2, -2);
-    fullGap.leftMargin = dp(12);
-    actions.addView(full, fullGap);
-    hero.addView(actions);
-    return hero;
-  }
-
-  private void demoHero() {
-    StoryOrder.Item next = demo.next(completed());
-    FrameLayout hero = new FrameLayout(this);
-    hero.setBackground(ui.shape(TvTheme.SURFACE_RAISED, 0, 14));
-    hero.setClipToOutline(true);
-    FrameLayout.LayoutParams art = new FrameLayout.LayoutParams(dp(mainWidth / 2), -1, Gravity.END);
-    hero.addView(ui.demoArt(0), art);
-    LinearLayout labels = ui.column();
-    labels.setPadding(dp(30), dp(26), dp(30), dp(24));
-    labels.addView(ui.text("CONTINUE IN STORY ORDER · DEMO", 12, TvUi.ACCENT));
-    ui.gap(labels, 12);
-    labels.addView(ui.title("Orbit Nine", 34));
-    ui.gap(labels, 12);
-    labels.addView(
-        ui.text(
-            next == null ? "Demo sequence complete" : "Season 1 · " + next.label(),
-            16,
-            TvUi.MUTED));
-    ui.gap(labels, 20);
-    LinearLayout actions = ui.row();
-    labels.addView(actions);
-    ui.action(actions, "View season", () -> navigate(new Screen("demo")), true);
-    hero.addView(labels, new FrameLayout.LayoutParams(dp(mainWidth * 2 / 3), -2));
-    content.addView(hero, new LinearLayout.LayoutParams(-1, dp(235)));
-  }
-
-  private void demoPosters() {
-    String[] titles = {
-      "Orbit Nine", "The Last Beacon", "Glass City", "Wild Current", "After the Rain"
-    };
-    LinearLayout row = horizontal();
-    for (int i = 0; i < titles.length; i++) {
-      final int index = i;
-      LinearLayout poster = ui.column();
-      poster.setPadding(dp(3), dp(3), dp(3), dp(9));
-      poster.addView(ui.demoArt(i), new LinearLayout.LayoutParams(-1, dp(240)));
-      ui.gap(poster, 10);
-      poster.addView(ui.title(titles[i], 16));
-      ui.focusable(
-          poster,
-          () -> {
-            if (index == 0) navigate(new Screen("demo"));
-            else
-              message(
-                  titles[index],
-                  "This is fictional demo artwork. Sign in with Plex to browse and play your"
-                      + " library.");
-          },
-          TvUi.BG,
-          0);
-      LinearLayout.LayoutParams lp =
-          new LinearLayout.LayoutParams(dp(itemWidth(columns(5))), -2);
-      lp.rightMargin = dp(14);
-      row.addView(poster, lp);
-    }
-  }
-
-  private View mediaHero(PlexCatalog.Entry entry) {
-    LinearLayout hero = ui.row();
-    hero.setPadding(dp(24), dp(20), dp(24), dp(20));
-    hero.setBackground(ui.shape(TvTheme.SURFACE_RAISED, 0, 12));
-    LinearLayout labels = ui.column();
-    // The media server's own on-deck item: name that source, never imply it is a queue's next
-    // item, and name the server rather than the provider.
-    String source = profile == null ? "" : profile.optString("serverName");
-    String eyebrow = source.isEmpty() ? "" : source.toUpperCase(Locale.ROOT) + " · ";
-    labels.addView(ui.text(eyebrow + "CONTINUE WATCHING", 12, TvUi.ACCENT));
-    ui.gap(labels, 12);
-    labels.addView(ui.title(entry.primary(), 29));
-    ui.gap(labels, 14);
-    String line = episodeLine(entry, "");
-    if (!line.isEmpty()) labels.addView(ui.text(line, 16, TvUi.MUTED));
-    ui.gap(labels, 14);
-    TextView view =
-        ui.button(
-            "View title",
-            R.drawable.lucide_film,
-            () -> navigate(new Screen("details", "", "", entry)),
-            true);
-    view.setContentDescription("View title. " + entry.spoken());
-    labels.addView(view);
-    hero.addView(labels, new LinearLayout.LayoutParams(0, -2, 1));
-    ImageView image = new ImageView(this);
-    image.setScaleType(ImageView.ScaleType.CENTER_CROP);
-    boolean isShowPoster = !entry.posterThumb().equals(entry.thumb());
-    hero.addView(image, new LinearLayout.LayoutParams(dp(isShowPoster ? 124 : 240), dp(185)));
-    loadArt(image, entry.posterThumb(), 720);
-    return hero;
-  }
+  final DemoCatalog demoCatalog = new DemoCatalog(this);
 
   /** "S1 · E9 · The signal", or the pre-0.5.2 "Episode 9" for a cached entry without a show. */
-  private static String episodeLine(PlexCatalog.Entry entry, String fallback) {
+  static String episodeLine(PlexCatalog.Entry entry, String fallback) {
     if (!entry.type().equals("episode")) return fallback;
     if (!entry.showTitle().isEmpty()) return entry.secondary();
     return entry.episode() > 0 ? "Episode " + entry.episode() : fallback;
   }
 
-  private interface Listing {
+  interface Listing {
     void ready(JSONArray entries, boolean cached);
   }
 
-  private File cacheFile(String id, String origin, String path) throws Exception {
+  File cacheFile(String id, String origin, String path) throws Exception {
     byte[] digest =
         MessageDigest.getInstance("SHA-256")
             .digest((id + "|" + origin + "|" + path).getBytes(StandardCharsets.UTF_8));
@@ -1257,7 +601,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return new File(getCacheDir(), key + ".json");
   }
 
-  private void fetch(String path, Listing callback, Runnable failure) {
+  void fetch(String path, Listing callback, Runnable failure) {
     int request = generation;
     String origin = server(), secret = token(), id = activeId;
     network.execute(
@@ -1812,7 +1156,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
   }
 
-  private void loadArt(ImageView view, String thumb, int width) {
+  void loadArt(ImageView view, String thumb, int width) {
     if (thumb.isEmpty()) return;
     int request = generation;
     String origin = server(), secret = token();
@@ -2503,184 +1847,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     player.seekTo(target);
   }
 
-  private void demoSeason() {
-    shell("Series");
-    heading("Fictional demo · Season 1", "Orbit Nine");
-    status.setText("Specials stay in viewing order. Episode numbers stay the same.");
-    LinearLayout row = horizontal();
-    Set<String> watched = completed();
-    StoryOrder.Item next = demo.next(watched);
-    for (StoryOrder.Item item : demo.items())
-      row.addView(
-          ui.card(
-              watched.contains(item.positionKey())
-                  ? "Watched"
-                  : next != null && item.positionKey().equals(next.positionKey())
-                      ? "Up next"
-                      : "Season 1",
-              item.label(),
-              item.title(),
-              "View demo episode",
-              () -> {
-                TvPanel d =
-                    panel()
-                        .setTitle("Orbit Nine · " + item.label() + " · " + item.title())
-                        .setMessage(
-                            "This fictional sequence demonstrates ordering and profile progress. It"
-                                + " doesn't play library media.")
-                        .setPositiveButton(
-                            "Mark watched",
-                            (dialog, which) -> {
-                              Set<String> done = completed();
-                              done.add(item.positionKey());
-                              prefs().edit().putStringSet("done:" + activeId, done).apply();
-                              render(new Screen("demo"));
-                            })
-                        .setNegativeButton("Back", null)
-                        .create();
-                d.show();
-                d.setPanelSize(dp(540), -2);
-              },
-              (mainWidth - 48) / 3));
-    focusFirst(row.getChildAt(0));
-    ui.gap(content, 24);
-    content.addView(
-        ui.button(
-            "Reset demo progress",
-            () -> {
-              prefs().edit().remove("done:" + activeId).apply();
-              render(new Screen("demo"));
-            },
-            false));
-  }
-
-  private void queues() {
-    shell("Watching");
-    heading("QueuePilot", "Your watching queues");
-    String origin = prefs().getString("queue-origin", "");
-    if (origin.isEmpty()) {
-      status.setText("Connect your QueuePilot server to see your queues here.");
-      content.addView(ui.button("Connect QueuePilot", this::queueSetup, true));
-      return;
-    }
-    Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
-    ui.action(content, "Choose people", R.drawable.lucide_users, this::chooseQueuePeople, false);
-    status.setText(selected.isEmpty() ? "All queues · loading…" : "Finding your queues…");
-    LinearLayout area = ui.column();
-    ui.gap(content, 16);
-    content.addView(area);
-    int request = generation;
-    loadLiveQueueLists(
-        origin,
-        (all, shown) -> {
-          if (request != generation) return;
-          JSONArray queues = shown.optJSONArray("queues");
-          status.setText(
-              (selected.isEmpty() ? "All people" : selectedPeopleLabel(selected))
-                  + " · "
-                  + (queues == null ? 0 : queues.length())
-                  + " queues");
-          // A live answer after saved queues replaces them, keeping focus in the grid.
-          View focused = getWindow().getDecorView().findFocus();
-          boolean isFocusInside = focused != null && isWithin(focused, area);
-          area.removeAllViews();
-          View first = renderQueueGroups(area, all, shown, origin, false);
-          if (isFocusInside && first != null) first.requestFocus();
-        },
-        error -> {
-          if (request == generation)
-            status.setText("QueuePilot couldn't load the TV queues. " + error.getMessage());
-        });
-  }
-
-  private String selectedPeopleLabel(Set<String> ids) {
-    List<String> names = new ArrayList<>();
-    for (int i = 0; i < queuePeople.length(); i++) {
-      JSONObject p = queuePeople.optJSONObject(i);
-      if (p != null && ids.contains(p.optString("id"))) names.add(p.optString("displayName"));
-    }
-    return String.join(" + ", names);
-  }
-
-  /** Who the queue is for, in the web app's text form: "Ada, Grace". */
-  private String queueAudience(JSONObject queue) {
-    // The server's own audience line, the same text the web app prints, when it sends one.
-    String audience = queue.optString("audience");
-    if (!audience.isEmpty()) return audience;
-    List<String> names = new ArrayList<>();
-    JSONArray list = queue.optJSONArray("people");
-    if (list != null)
-      for (int i = 0; i < list.length(); i++) {
-        String id = list.optString(i), name = id;
-        for (int j = 0; queuePeople != null && j < queuePeople.length(); j++) {
-          JSONObject person = queuePeople.optJSONObject(j);
-          if (person != null && id.equals(person.optString("id")))
-            name = person.optString("displayName", id);
-        }
-        names.add(name);
-      }
-    return QueueList.audience(names);
-  }
-
-  private void chooseQueuePeople() {
-    Set<String> selected = new HashSet<>(prefs().getStringSet("queue-people", Set.of()));
-    LinearLayout rows = ui.column();
-    rows.setPadding(dp(20), dp(12), dp(20), dp(12));
-    ScrollView scroll = new ScrollView(this);
-    scroll.addView(rows);
-    TvPanel dialog =
-        panel()
-            .setTitle("Who are these queues for?")
-            .setMessage(
-                "Select people to narrow the queues. This does not change the Plex playback"
-                    + " profile.")
-            .setView(scroll)
-            .setPositiveButton(
-                "Apply",
-                (d, w) -> {
-                  prefs().edit().putStringSet("queue-people", selected).apply();
-                  render(new Screen("queues"));
-                })
-            .setNeutralButton(
-                "All people",
-                (d, w) -> {
-                  prefs().edit().remove("queue-people").apply();
-                  render(new Screen("queues"));
-                })
-            .setNegativeButton("Cancel", null)
-            .create();
-    for (int i = 0; i < queuePeople.length(); i++) {
-      JSONObject person = queuePeople.optJSONObject(i);
-      if (person == null) continue;
-      String id = person.optString("id");
-      LinearLayout row = ui.row();
-      row.setGravity(Gravity.CENTER_VERTICAL);
-      row.setPadding(dp(10), dp(8), dp(10), dp(8));
-      ImageView face = avatar(42);
-      loadQueueAvatar(face, id, prefs().getString("queue-origin", ""));
-      row.addView(face);
-      TextView choice = ui.text(person.optString("displayName"), 16, TvUi.WHITE);
-      choice.setPadding(dp(12), 0, dp(8), 0);
-      row.addView(choice, new LinearLayout.LayoutParams(0, -2, 1));
-      TextView check = ui.text(selected.contains(id) ? "✓" : "○", 20, TvUi.ACCENT);
-      check.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-      row.addView(check);
-      row.setContentDescription(person.optString("displayName"));
-      row.setStateDescription(selected.contains(id) ? "Selected" : "Not selected");
-      ui.focusable(
-          row,
-          () -> {
-            if (!selected.add(id)) selected.remove(id);
-            check.setText(selected.contains(id) ? "✓" : "○");
-            row.setStateDescription(selected.contains(id) ? "Selected" : "Not selected");
-          },
-          TvUi.PANEL);
-      rows.addView(row);
-      ui.gap(rows, 6);
-    }
-    dialog.show();
-    dialog.setPanelSize(dp(390), -2);
-  }
+  final WatchingScreen watchingScreen = new WatchingScreen(this);
 
   // The TV PIN: a queue marked "Locked on TV" in QueuePilot opens only after the household PIN.
   // The server enforces it (423 without a valid unlock); the TV only decides when to ask.
@@ -2870,7 +2037,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return proof;
   }
 
-  private void startNativeQueue(JSONObject queue) {
+  void startNativeQueue(JSONObject queue) {
     startNativeQueue(queue, null);
   }
 
@@ -2959,7 +2126,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                         return;
                       }
                       // A finished queue has nothing to continue on Home.
-                      prefs().edit().remove(snapshotKey()).apply();
+                      prefs().edit().remove(queueLoader.snapshotKey()).apply();
                       render(new Screen("queues"));
                     } else {
                       try {
@@ -2985,7 +2152,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       return;
     }
     JSONObject item = items.optJSONObject(nativeIndex);
-    saveQueueSnapshot(item);
+    queueLoader.saveQueueSnapshot(item);
     int request = generation;
     String defaultOrigin = server(), defaultToken = token();
     // A JSON null reads as the text "null" through optString, so test for it first.
@@ -3108,7 +2275,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   // Full queue: the whole ordered queue from QueuePilot, in the layout the server chose for its
   // content (a list for episodes, an artwork grid for movies), with tonight's lineup marked.
 
-  private void openFullQueue(JSONObject queue) {
+  void openFullQueue(JSONObject queue) {
     String id = queue.optString("id");
     knownQueues.put(id, queue);
     isWatchedShown = false;
@@ -3168,7 +2335,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void fullQueue(String setId, String title) {
     shell("Watching");
     JSONObject queue = queueFor(setId, title);
-    String audience = queue.has("people") ? queueAudience(queue) : "";
+    String audience = queue.has("people") ? queueCards.queueAudience(queue) : "";
     heading(audience.isEmpty() ? "Queue" : "Queue · " + audience, title);
     status.setText("Loading the whole queue…");
     LinearLayout actions = ui.row();
@@ -3883,7 +3050,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
               14,
               TvUi.MUTED));
       heading.addView(names, new LinearLayout.LayoutParams(0, -2, 1));
-      heading.addView(fullQueueButton(queue));
+      heading.addView(queueCards.fullQueueButton(queue));
       area.addView(heading);
       ui.gap(area, 14);
       LinearLayout row = null;
@@ -4033,7 +3200,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     holder[0].setPanelSize(dp(460), -2);
   }
 
-  private void queueSetup() {
+  void queueSetup() {
     LinearLayout form = ui.column();
     form.setPadding(dp(24), dp(8), dp(24), dp(8));
     EditText input = new EditText(this);
@@ -4549,7 +3716,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
   }
 
-  private void loadQueueAvatar(ImageView face, String id, String origin) {
+  void loadQueueAvatar(ImageView face, String id, String origin) {
     loadPicture(
         face,
         PlexCatalog.url(origin, "/api/native/people/" + PlexAccount.encode(id) + "/avatar"),
@@ -5077,7 +4244,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     panelNote(body, "Finding your queues…");
     holder[0].show();
     holder[0].setPanelSize(dp(460), -2);
-    fetchQueues(
+    queueLoader.fetchQueues(
         origin,
         Set.of(),
         all -> {
@@ -5093,7 +4260,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           body.removeAllViews();
           View first = null;
           for (JSONObject queue : targets.addable()) {
-            String name = queue.optString("title", "Movies & Shows"), audience = queueAudience(queue);
+            String name = queue.optString("title", "Movies & Shows"), audience = queueCards.queueAudience(queue);
             boolean isLocked = queue.optBoolean("isLocked");
             TextView choice =
                 panelButton(
@@ -5385,7 +4552,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return first;
   }
 
-  private void message(String title, String text) {
+  void message(String title, String text) {
     TvPanel d = panel().setTitle(title).setMessage(text).setPositiveButton("Close", null).create();
     d.show();
     d.setPanelSize(dp(360), -2);
@@ -5431,7 +4598,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   protected void onResume() {
     super.onResume();
     // Coming back to a screen that still shows saved queues asks QueuePilot again at once.
-    retryQueuesNow("resumed");
+    queueLoader.retryQueuesNow("resumed");
   }
 
   @Override
