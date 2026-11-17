@@ -48,7 +48,8 @@ in the checkout first:
 ```
 
 `tools/tv-lab.sh test` calls `queuepilot-test run` with `tools/tv-checks.sh` from the same
-checkout. The environment takes its lock, so a second run waits instead of overlapping. It
+checkout. The environment takes its lock, so a second run waits instead of overlapping, and waiting
+runs start in the order they arrived. It
 saves an emulator snapshot of the person's session, shows the test banner on the page, and
 blocks the browser remote. It then installs the checkout's debug APK, starts
 `tools/fixture_server.py` with `FIXTURE_ROOT`, and runs the checks: the emulator-only hierarchy

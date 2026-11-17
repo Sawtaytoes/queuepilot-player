@@ -22,7 +22,7 @@ RUN curl -fsSLo /tmp/novnc.tar.gz "https://github.com/novnc/noVNC/archive/refs/t
          "noVNC-${NOVNC_VERSION}/LICENSE.txt" "noVNC-${NOVNC_VERSION}/AUTHORS" \
     && rm /tmp/novnc.tar.gz
 
-COPY qptest.py supervisor.py queuepilot-test /opt/queuepilot-test/
+COPY qptest.py supervisor.py turnqueue.py queuepilot-test /opt/queuepilot-test/
 COPY web /opt/queuepilot-test/web
 RUN chmod 755 /opt/queuepilot-test/supervisor.py /opt/queuepilot-test/queuepilot-test \
     && ln -s /opt/queuepilot-test/queuepilot-test /usr/local/bin/queuepilot-test

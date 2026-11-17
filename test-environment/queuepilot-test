@@ -10,7 +10,7 @@
   queuepilot-test idle <minutes>                 # change the idle stop until the container restarts
 
 `run` is the only supported way for an automated test to use the emulator. It takes
-the shared lock, saves the owner's session, runs the command with the fixture server
+the shared lock in arrival order, saves the owner's session, runs the command with the fixture server
 from the given checkout, and restores the session afterward, whatever the outcome.
 """
 
@@ -30,6 +30,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import qptest  # noqa: E402
+import turnqueue  # noqa: E402
+
+QUEUE_PATH = qptest.STATE / 'queue'
 
 
 class UnixConnection(http.client.HTTPConnection):
@@ -119,15 +122,13 @@ def command_run(arguments):
     qptest.LOCK_PATH.touch(exist_ok=True)
     lock = open(qptest.LOCK_PATH, 'a')
     deadline = time.monotonic() + arguments.wait
-    while True:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except BlockingIOError:
-            if time.monotonic() > deadline:
-                holder = qptest.read_json(qptest.SESSION_PATH, {})
-                raise SystemExit(f"queuepilot-test: another test holds the emulator: {holder.get('label', 'unknown')}")
-            time.sleep(5)
+    # A stopped waiter leaves the queue; a killed one is removed by the next reader.
+    stopper = turnqueue.Stopper().install()
+    ticket = turnqueue.Ticket(QUEUE_PATH, label).enter()
+    if not turnqueue.take_turn(lock, ticket, deadline):
+        holder = qptest.read_json(qptest.SESSION_PATH, {})
+        raise SystemExit(f"queuepilot-test: another test holds the emulator: {holder.get('label', 'unknown')}")
+    stopper.has_turn = True  # from here a stop is recorded, so the cleanup below always runs
 
     fixture = None
     status = 1
@@ -146,10 +147,9 @@ def command_run(arguments):
             time.sleep(1)
         environment = {**qptest.ENVIRONMENT, 'QUEUEPILOT_TEST_SOURCE': str(source or ''),
                        'FIXTURE_ROOT': str(qptest.FIXTURES)}
-        child = subprocess.Popen(command, env=environment, cwd=str(source) if source else None)
-        signal.signal(signal.SIGTERM, lambda *_: child.terminate())
-        status = child.wait()
+        status = stopper.run(command, env=environment, cwd=str(source) if source else None)
     finally:
+        stopper.end()
         if fixture is not None:
             os.killpg(fixture.pid, signal.SIGTERM)
             fixture.wait()
@@ -187,6 +187,8 @@ def main():
 
     if arguments.operation == 'status':
         print(describe(call('GET', '/status')))
+        for position, waiting in enumerate(turnqueue.queued(QUEUE_PATH), 1):
+            print(f'queued {position}: {waiting}')
     elif arguments.operation == 'start':
         print(describe(call('POST', '/start')))
     elif arguments.operation == 'stop':

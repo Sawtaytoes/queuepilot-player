@@ -57,6 +57,8 @@ jobs:
           python3 tools/kotlin_colors_test.py
           python3 tools/smoke_launcher_test.py
           python3 tools/move_check_test.py
+          python3 test-environment/turnqueue_test.py
+          timeout 120 python3 test-environment/run_test.py
           python3 tools/theme_check.py
       - name: File size check
         run: python3 tools/size_check.py

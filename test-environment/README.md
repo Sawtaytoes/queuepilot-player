@@ -65,7 +65,10 @@ existing app (`install -r -d`), which keeps the app's data, and it never uninsta
 Tests use `queuepilot-test run`. It is the only supported path, and it never overlaps
 another run:
 
-1. It takes the lock file `/state/test.lock` (a second run waits, 30 minutes by default).
+1. It takes the lock file `/state/test.lock` in arrival order. A second run waits, 30
+   minutes by default, with a ticket in `/state/queue`, and only the oldest live ticket may
+   take the lock (`turnqueue.py`). A waiter that is killed loses its place at the next
+   check. `queuepilot-test status` lists the queued runs.
 2. The supervisor starts the emulator if needed and saves an emulator snapshot of the
    shared session. The page shows the automated-test banner and refuses input.
 3. It installs the test APK, starts `tools/fixture_server.py` from the given checkout,
@@ -76,6 +79,12 @@ another run:
 A snapshot restores the whole guest, including the Android Keystore entries that
 `pm clear` deletes. Copying the app's data directory cannot restore those keys, so a
 data backup would sign the person out.
+
+A stop (SIGTERM, SIGHUP, or Ctrl-C) while a run waits removes it from the queue. Once the run
+has the lock, a stop ends the test command and every process in its process group (SIGTERM,
+then SIGKILL after 10 seconds), and only then restores the session and releases the lock.
+A process that leaves the group with `setsid`, such as the shared adb server, is not
+followed.
 
 If the test process dies, the kernel releases the lock and the supervisor restores the
 session on its own. If the container stops during a test, the next start boots from the
