@@ -116,7 +116,7 @@ final class QueueCards {
 
   TextView fullQueueButton(JSONObject queue) {
     TextView full =
-        host.ui.button("Full queue", R.drawable.lucide_list_ordered, () -> host.openFullQueue(queue), false);
+        host.ui.button("Full queue", R.drawable.lucide_list_ordered, () -> host.fullQueueScreen.openFullQueue(queue), false);
     // Titles repeat, so the spoken name carries the audience as the card does.
     full.setContentDescription(
         "Full queue. "
