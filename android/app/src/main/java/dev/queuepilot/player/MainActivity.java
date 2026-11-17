@@ -31,8 +31,8 @@ import org.json.JSONObject;
 /** Native queue-first TV presentation with Plex device-link onboarding. */
 @androidx.media3.common.util.UnstableApi
 public final class MainActivity extends androidx.activity.ComponentActivity {
-  private final ExecutorService network = Executors.newFixedThreadPool(4);
-  private final Handler handler = new Handler(Looper.getMainLooper());
+  final ExecutorService network = Executors.newFixedThreadPool(4);
+  final Handler handler = new Handler(Looper.getMainLooper());
 
   /** The logcat tag of the queue list's failures and live retries. */
   static final String QUEUE_LOG = "QueuePilotQueues";
@@ -45,23 +45,23 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private LiveQueueRetry queueRetry;
 
   private android.net.ConnectivityManager.NetworkCallback networkCallback;
-  private final Deque<Screen> history = new ArrayDeque<>();
+  final Deque<Screen> history = new ArrayDeque<>();
   private final Map<Screen, String> focusMemory = new HashMap<>();
   private final StoryOrder demo = StoryOrder.demo();
-  private TvUi ui;
-  private ProfileStore store;
-  private JSONArray profiles = new JSONArray();
-  private JSONObject account = new JSONObject(), profile;
+  TvUi ui;
+  ProfileStore store;
+  JSONArray profiles = new JSONArray();
+  JSONObject account = new JSONObject(), profile;
   private String activeId = "demo-ada";
-  private PlexAccount auth;
+  PlexAccount auth;
   private String deviceName = DeviceName.FALLBACK;
-  private LinearLayout content;
-  private TextView status;
+  LinearLayout content;
+  TextView status;
   private ExoPlayer player;
   private AssPlayback assPlayback;
   private PlayerView playerView;
   private androidx.media3.session.MediaSession mediaSession;
-  private volatile int generation;
+  volatile int generation;
   private int mainWidth;
   private boolean fixture;
   private Screen current;
@@ -113,26 +113,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private String fullQueueFocus = "";
   private int historyDays = 30;
 
-  /**
-   * One screen in the Back history. {@code position} is the library item a paged grid is
-   * restored around, so Back from a title deep in a library returns to that title.
-   */
-  private record Screen(
-      String kind, String path, String title, PlexCatalog.Entry entry, int position) {
-    Screen(String kind, String path, String title, PlexCatalog.Entry entry) {
-      this(kind, path, title, entry, 0);
-    }
-
-    Screen(String kind) {
-      this(kind, "", "", null);
-    }
-  }
-
-  private SharedPreferences prefs() {
+  SharedPreferences prefs() {
     return getSharedPreferences("state", MODE_PRIVATE);
   }
 
-  private int dp(int size) {
+  int dp(int size) {
     return ui.dp(size);
   }
 
@@ -205,31 +190,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     watchDefaultNetwork();
     setProfile(prefs().getString("active", "demo-ada"));
     if (profile != null || prefs().getBoolean("preview", false)) home();
-    else if (!account.optString("token").isEmpty()) openOwnProfile();
+    else if (!account.optString("token").isEmpty()) profilePicker.openOwnProfile();
     else render(new Screen("welcome"));
   }
 
-  /**
-   * After sign-in, opens the signed-in account's own Plex profile without a choice: queues play
-   * as the profile each queue names, so nobody has to pick a profile to reach them. The picker
-   * stays one press away on the rail avatar, for library browsing, search, and single titles,
-   * which use the chosen profile. A PIN-protected own profile still shows the picker.
-   */
-  private void openOwnProfile() {
-    JSONObject own = null;
-    JSONArray users = account.optJSONArray("users");
-    String uuid = account.optString("uuid");
-    for (int i = 0; users != null && i < users.length(); i++) {
-      JSONObject user = users.optJSONObject(i);
-      if (user == null) continue;
-      boolean isOwn = uuid.isEmpty() ? user.optBoolean("admin") : uuid.equals(user.optString("uuid"));
-      if (isOwn) own = user;
-    }
-    if (own == null || own.optBoolean("protected")) render(new Screen("profiles"));
-    else selectUser(own);
-  }
+  final ProfilePicker profilePicker = new ProfilePicker(this);
 
-  private void setProfile(String id) {
+  void setProfile(String id) {
     profile = null;
     for (int i = 0; i < profiles.length(); i++) {
       JSONObject candidate = profiles.optJSONObject(i);
@@ -260,12 +227,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return new HashSet<>(prefs().getStringSet("done:" + activeId, Set.of()));
   }
 
-  private void home() {
+  void home() {
     history.clear();
     render(new Screen("home"));
   }
 
-  private void navigate(Screen screen) {
+  void navigate(Screen screen) {
     if (current != null) {
       View focused = getWindow().getDecorView().findFocus();
       if (focused != null) focusMemory.put(current, focusKey(focused));
@@ -274,7 +241,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     render(screen);
   }
 
-  private void back() {
+  void back() {
     if (player != null) reportPlayback("stopped");
     advancing = true;
     nativePlan = null;
@@ -284,7 +251,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     else moveTaskToBack(true);
   }
 
-  private void reset() {
+  void reset() {
     closePanels();
     generation++;
     handler.removeCallbacksAndMessages(null);
@@ -292,13 +259,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     releasePlayer();
   }
 
-  private void render(Screen screen) {
+  void render(Screen screen) {
     reset();
     current = screen;
     switch (screen.kind()) {
-      case "welcome" -> welcome();
-      case "signin" -> signIn();
-      case "profiles" -> chooseProfile();
+      case "welcome" -> signInScreen.welcome();
+      case "signin" -> signInScreen.signIn();
+      case "profiles" -> profilePicker.chooseProfile();
       case "settings" -> settings();
       case "library" -> load(screen.path(), screen.title());
       case "details" -> details(screen.entry());
@@ -322,7 +289,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private boolean isRailExpanded;
   private android.animation.ValueAnimator railAnimation;
 
-  private void shell(String selected) {
+  void shell(String selected) {
     FrameLayout root = new FrameLayout(this);
     root.setBackgroundColor(TvUi.BG);
     shellRoot = root;
@@ -402,7 +369,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       if (thumb.isEmpty() && users != null)
         for (int i = 0; i < users.length(); i++) {
           JSONObject user = users.optJSONObject(i);
-          if (user != null && userId(user).equals(activeId)) thumb = user.optString("thumb");
+          if (user != null && profilePicker.userId(user).equals(activeId)) thumb = user.optString("thumb");
         }
       loadProfileAvatar(face, thumb);
     }
@@ -530,7 +497,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     };
   }
 
-  private void heading(String eyebrow, String title) {
+  void heading(String eyebrow, String title) {
     heading(eyebrow, title, 34);
   }
 
@@ -548,13 +515,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return heading;
   }
 
-  private void section(String title) {
+  void section(String title) {
     ui.gap(content, 26);
     content.addView(ui.title(title, 23));
     ui.gap(content, 16);
   }
 
-  private LinearLayout horizontal() {
+  LinearLayout horizontal() {
     HorizontalScrollView scroll = new HorizontalScrollView(this);
     scroll.setHorizontalScrollBarEnabled(false);
     scroll.setClipToPadding(false);
@@ -581,7 +548,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return null;
   }
 
-  private void focusFirst(View view) {
+  void focusFirst(View view) {
     view.post(
         () -> {
           if (!view.isAttachedToWindow()) return;
@@ -591,7 +558,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         });
   }
 
-  private void centered(String eyebrow, String title, String description) {
+  void centered(String eyebrow, String title, String description) {
     FrameLayout frame = new FrameLayout(this);
     frame.setBackgroundColor(TvUi.BG);
     content = ui.column();
@@ -604,24 +571,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     status.setText(description);
   }
 
-  private void welcome() {
-    centered(
-        "QueuePilot TV",
-        "Your people. Your queues.",
-        "Connect your Plex library to start watching. Sign in on your phone with a short TV code.");
-    LinearLayout actions = ui.row();
-    content.addView(actions);
-    ui.action(actions, "Sign in with Plex", () -> navigate(new Screen("signin")), true);
-    ui.action(
-        actions,
-        "Explore the demo",
-        () -> {
-          prefs().edit().putBoolean("preview", true).apply();
-          home();
-        },
-        false);
-    focusFirst(actions.getChildAt(0));
-  }
+  final SignInScreen signInScreen = new SignInScreen(this);
 
   private void drawHome() {
     shell("Home");
@@ -1292,420 +1242,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     if (!entry.type().equals("episode")) return fallback;
     if (!entry.showTitle().isEmpty()) return entry.secondary();
     return entry.episode() > 0 ? "Episode " + entry.episode() : fallback;
-  }
-
-  private void signIn() {
-    centered(
-        "Connect Plex",
-        "Sign in on your phone",
-        "Visit plex.tv/link in your phone or computer's browser, then enter this code.");
-    TextView code = ui.title("…", 56);
-    code.setLetterSpacing(.16f);
-    content.addView(code);
-    ui.gap(content, 16);
-    TextView hint = ui.text("Getting your sign-in code…", 15, TvUi.MUTED);
-    content.addView(hint);
-    ui.gap(content, 24);
-    LinearLayout actions = ui.row();
-    content.addView(actions);
-    ui.action(actions, "New code", () -> render(new Screen("signin")), false);
-    ui.action(actions, "Back", this::back, false);
-    focusFirst(actions.getChildAt(1));
-    int request = generation;
-    network.execute(
-        () -> {
-          try {
-            JSONObject pin = auth.createPin();
-            long expires =
-                SystemClock.elapsedRealtime() + Math.max(1, pin.optInt("expiresIn", 900)) * 1000L;
-            long id = pin.getLong("id");
-            String value = pin.getString("code");
-            runOnUiThread(
-                () -> {
-                  if (request != generation) return;
-                  code.setText(value);
-                  poll(request, id, value, expires, hint);
-                });
-          } catch (Exception e) {
-            runOnUiThread(
-                () -> {
-                  if (request == generation) {
-                    code.setText("—");
-                    hint.setText(
-                        "Plex couldn't be reached. Check your connection and choose New code.");
-                  }
-                });
-          }
-        });
-  }
-
-  private void poll(int request, long id, String code, long expires, TextView hint) {
-    if (request != generation) return;
-    long seconds = (expires - SystemClock.elapsedRealtime()) / 1000;
-    if (seconds <= 0) {
-      hint.setText("This code has expired. Choose New code to try again.");
-      return;
-    }
-    hint.setText(
-        "Waiting for you to finish signing in · "
-            + (seconds / 60)
-            + ":"
-            + String.format(Locale.ROOT, "%02d", seconds % 60)
-            + " remaining");
-    network.execute(
-        () -> {
-          try {
-            JSONObject result = auth.pollPin(id, code);
-            String secret = result.optString("authToken");
-            if (!secret.isEmpty() && !secret.equals("null")) {
-              JSONObject who = auth.user(secret);
-              JSONArray users = auth.users(secret);
-              JSONObject connected =
-                  new JSONObject()
-                      .put("token", secret)
-                      .put("name", who.optString("title", who.optString("username", "Plex")))
-                      .put("uuid", who.optString("uuid"))
-                      .put("users", users);
-              runOnUiThread(
-                  () -> {
-                    if (request != generation) return;
-                    try {
-                      store.account(connected);
-                      account = connected;
-                      prefs().edit().putBoolean("preview", false).apply();
-                      history.clear();
-                      openOwnProfile();
-                    } catch (Exception e) {
-                      hint.setText(
-                          "Sign-in succeeded, but credentials could not be saved. Please try"
-                              + " again.");
-                    }
-                  });
-              return;
-            }
-            runOnUiThread(
-                () -> {
-                  if (request == generation)
-                    handler.postDelayed(() -> poll(request, id, code, expires, hint), 2000);
-                });
-          } catch (Exception e) {
-            runOnUiThread(
-                () -> {
-                  if (request != generation) return;
-                  if (e instanceof PlexAccount.Failure
-                      && Set.of(404, 410).contains(((PlexAccount.Failure) e).status)) {
-                    hint.setText("This code has expired. Choose New code to try again.");
-                    return;
-                  }
-                  hint.setText("Waiting for Plex. We'll retry shortly.");
-                  handler.postDelayed(() -> poll(request, id, code, expires, hint), 4000);
-                });
-          }
-        });
-  }
-
-  private static String profileBadge(JSONObject user) {
-    if (user.optBoolean("protected")) return "🔒 PIN";
-    return user.optBoolean("admin") ? "Owner" : "";
-  }
-
-  private void chooseProfile() {
-    shell("");
-    heading("", "Who's watching?");
-    status.setText("Choose a profile to use its library access.");
-    LinearLayout row = horizontal();
-    JSONArray users = account.optJSONArray("users");
-    if (users != null)
-      for (int i = 0; i < users.length(); i++) {
-        JSONObject user = users.optJSONObject(i);
-        if (user == null) continue;
-        String name = user.optString("title", user.optString("username", "Profile"));
-        // Only what differs between profiles: a PIN lock, or the account owner.
-        LinearLayout profileCard =
-            ui.card(
-                profileBadge(user),
-                name,
-                "",
-                "Choose profile",
-                () -> selectUser(user),
-                220);
-        String badge = profileBadge(user);
-        profileCard.setContentDescription(
-            name + (badge.isEmpty() ? "" : ". " + badge.replace("🔒 ", "")) + ". Choose profile");
-        ImageView face = avatar(70);
-        loadProfileAvatar(face, user.optString("thumb"));
-        profileCard.addView(face, 0);
-        row.addView(profileCard);
-      }
-    else
-      for (int i = 0; i < profiles.length(); i++) {
-        JSONObject p = profiles.optJSONObject(i);
-        row.addView(
-            ui.card(
-                "",
-                p.optString("name"),
-                "Available on this device.",
-                "Choose profile",
-                () -> {
-                  setProfile(p.optString("id"));
-                  home();
-                },
-                220));
-      }
-    if (account.optString("token").isEmpty()) {
-      section("Plex account");
-      content.addView(ui.button("Sign in with Plex", () -> navigate(new Screen("signin")), true));
-    }
-    if (prefs().getBoolean("preview", false)) {
-      section("Demo profiles");
-      LinearLayout demos = horizontal();
-      for (String name : List.of("Ada", "Grace"))
-        demos.addView(
-            ui.card(
-                "Fictional profile",
-                name,
-                "Separate demo viewing progress.",
-                "Choose demo profile",
-                () -> {
-                  setProfile("demo-" + name.toLowerCase(Locale.ROOT));
-                  home();
-                },
-                220));
-    }
-    if (row.getChildCount() > 0) focusFirst(row.getChildAt(0));
-  }
-
-  private String userId(JSONObject user) {
-    return user.optString("uuid", user.optString("id"));
-  }
-
-  private void selectUser(JSONObject user) {
-    String id = userId(user);
-    if (!user.optBoolean("protected"))
-      for (int i = 0; i < profiles.length(); i++) {
-        JSONObject p = profiles.optJSONObject(i);
-        if (p != null && p.optString("id").equals(id)) {
-          setProfile(id);
-          home();
-          return;
-        }
-      }
-    if (user.optBoolean("protected")) {
-      LinearLayout form = ui.column();
-      form.setPadding(dp(24), dp(8), dp(24), dp(16));
-      StringBuilder pin = new StringBuilder();
-      TextView dots = ui.title("○  ○  ○  ○", 30);
-      dots.setGravity(Gravity.CENTER);
-      form.addView(dots);
-      ui.gap(form, 18);
-      TvPanel dialog =
-          panel()
-              .setTitle("Unlock " + user.optString("title", "profile"))
-              .setMessage("Enter this profile's four-digit Plex Home PIN.")
-              .setView(form)
-              .setPositiveButton("Continue", null)
-              .setNegativeButton("Cancel", null)
-              .create();
-      Runnable update =
-          () -> {
-            StringBuilder display = new StringBuilder();
-            for (int i = 0; i < 4; i++) display.append(i < pin.length() ? "●  " : "○  ");
-            dots.setText(display.toString().trim());
-            dialog.getButton(TvPanel.BUTTON_POSITIVE).setEnabled(pin.length() == 4);
-          };
-      GridLayout keypad = new GridLayout(this);
-      keypad.setColumnCount(3);
-      LinearLayout.LayoutParams padLayout = new LinearLayout.LayoutParams(-2, -2);
-      padLayout.gravity = Gravity.CENTER_HORIZONTAL;
-      form.addView(keypad, padLayout);
-      for (String key :
-          List.of("1", "2", "3", "4", "5", "6", "7", "8", "9", "Delete", "0", "Clear")) {
-        TextView button =
-            ui.button(
-                key,
-                () -> {
-                  if (key.equals("Delete")) {
-                    if (pin.length() > 0) pin.deleteCharAt(pin.length() - 1);
-                  } else if (key.equals("Clear")) pin.setLength(0);
-                  else if (pin.length() < 4) pin.append(key);
-                  update.run();
-                },
-                false);
-        GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-        lp.width = dp(90);
-        lp.height = dp(48);
-        lp.setMargins(dp(4), dp(4), dp(4), dp(4));
-        keypad.addView(button, lp);
-      }
-      dialog.setOnShowListener(
-          v -> {
-            dialog.setPanelSize(dp(440), -2);
-            dialog.getButton(TvPanel.BUTTON_POSITIVE).setEnabled(false);
-            dialog
-                .getButton(TvPanel.BUTTON_POSITIVE)
-                .setOnClickListener(
-                    view -> {
-                      if (pin.length() == 4) {
-                        String value = pin.toString();
-                        pin.setLength(0);
-                        dialog.dismiss();
-                        connectUser(user, value);
-                      }
-                    });
-            keypad.getChildAt(0).requestFocus();
-          });
-      dialog.setOnKeyListener(
-          (d, keyCode, event) -> {
-            if (keyCode >= KeyEvent.KEYCODE_0 && keyCode <= KeyEvent.KEYCODE_9) {
-              if (event.getAction() == KeyEvent.ACTION_UP && pin.length() < 4) {
-                pin.append(keyCode - KeyEvent.KEYCODE_0);
-                update.run();
-              }
-              return true;
-            }
-            return false;
-          });
-      dialog.show();
-    } else connectUser(user, "");
-  }
-
-  private void connectUser(JSONObject user, String pin) {
-    reset();
-    shell("");
-    heading("Plex Home", "Opening " + user.optString("title", "your profile"));
-    status.setText("Finding your Plex servers…");
-    int request = generation;
-    network.execute(
-        () -> {
-          try {
-            String userToken = auth.switchUser(account.getString("token"), userId(user), pin);
-            JSONArray servers = auth.servers(userToken);
-            for (int i = 0; i < servers.length(); i++)
-              servers.getJSONObject(i).put("profileProof", userToken);
-            runOnUiThread(
-                () -> {
-                  if (request != generation) return;
-                  if (servers.length() == 0) {
-                    status.setText("This profile has no Plex Media Servers available.");
-                    content.addView(
-                        ui.button(
-                            "Choose another profile", () -> render(new Screen("profiles")), false));
-                  } else if (servers.length() == 1) connectServer(user, servers.optJSONObject(0));
-                  else {
-                    status.setText("Choose a Plex server.");
-                    LinearLayout row = horizontal();
-                    for (int i = 0; i < servers.length(); i++) {
-                      JSONObject s = servers.optJSONObject(i);
-                      row.addView(
-                          ui.card(
-                              "Plex server",
-                              s.optString("name"),
-                              "",
-                              "Connect",
-                              () -> connectServer(user, s),
-                              260));
-                    }
-                    focusFirst(row.getChildAt(0));
-                  }
-                });
-          } catch (Exception e) {
-            runOnUiThread(
-                () -> {
-                  if (request == generation) {
-                    status.setText(
-                        e instanceof PlexAccount.Failure
-                                && Set.of(401, 403).contains(((PlexAccount.Failure) e).status)
-                            ? "Plex couldn't unlock that profile. Check the PIN and try again."
-                            : "Plex couldn't load this profile. Check your connection and try"
-                                + " again.");
-                    content.addView(
-                        ui.button("Choose profile", () -> render(new Screen("profiles")), true));
-                  }
-                });
-          }
-        });
-  }
-
-  private void connectServer(JSONObject user, JSONObject selected) {
-    reset();
-    shell("");
-    heading("Plex server", selected.optString("name", "Connecting"));
-    status.setText("Connecting directly to your server…");
-    int request = generation;
-    network.execute(
-        () -> {
-          try {
-            JSONArray connections = selected.optJSONArray("connections");
-            List<JSONObject> candidates = new ArrayList<>();
-            if (connections != null)
-              for (int i = 0; i < connections.length(); i++) {
-                JSONObject c = connections.optJSONObject(i);
-                if (c != null
-                    && ServerConnectionPolicy.allowed(
-                        c.optString("uri"), c.optBoolean("local"), c.optBoolean("relay")))
-                  candidates.add(c);
-              }
-            candidates.sort(
-                Comparator.comparingInt(
-                    c ->
-                        (c.optBoolean("local") ? 0 : 2)
-                            + (c.optString("uri").startsWith("https:") ? 0 : 1)));
-            String secret = selected.getString("accessToken"), origin = "";
-            for (JSONObject connection : candidates) {
-              if (request != generation) return;
-              try {
-                String candidate = PlexCatalog.base(connection.getString("uri"));
-                PlexCatalog.list(
-                    PlexCatalog.get(candidate + "/library/sections", secret, 16 * 1024 * 1024));
-                origin = candidate;
-                break;
-              } catch (Exception ignored) {
-              }
-            }
-            if (origin.isEmpty()) throw new IllegalStateException("No direct connection");
-            JSONObject p =
-                new JSONObject()
-                    .put("id", userId(user))
-                    .put("name", user.optString("title", user.optString("username", "Profile")))
-                    .put("server", origin)
-                    .put("serverName", selected.optString("name"))
-                    .put("serverId", selected.optString("clientIdentifier"))
-                    .put("token", secret)
-                    .put("profileProof", selected.optString("profileProof"))
-                    .put("thumb", user.optString("thumb"));
-            runOnUiThread(
-                () -> {
-                  if (request != generation) return;
-                  try {
-                    JSONArray updated = new JSONArray();
-                    for (int i = 0; i < profiles.length(); i++) {
-                      JSONObject existing = profiles.optJSONObject(i);
-                      if (!existing.optString("id").equals(p.optString("id")))
-                        updated.put(existing);
-                    }
-                    updated.put(p);
-                    store.write(updated);
-                    profiles = updated;
-                    setProfile(p.optString("id"));
-                    prefs().edit().putBoolean("preview", false).apply();
-                    home();
-                  } catch (Exception e) {
-                    status.setText("Credentials could not be saved. Please try again.");
-                  }
-                });
-          } catch (Exception e) {
-            runOnUiThread(
-                () -> {
-                  if (request == generation) {
-                    status.setText(
-                        "A direct connection to this server isn't available. Check that the server"
-                            + " is running and reachable.");
-                    content.addView(
-                        ui.button("Try again", () -> connectServer(user, selected), true));
-                  }
-                });
-          }
-        });
   }
 
   private interface Listing {
@@ -3320,7 +2856,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     if (homeRoster != null)
       for (int i = 0; i < homeRoster.length(); i++) {
         JSONObject u = homeRoster.optJSONObject(i);
-        if (u != null && userId(u).equals(activeId)) homeUser = u;
+        if (u != null && profilePicker.userId(u).equals(activeId)) homeUser = u;
       }
     if (homeUser == null || (homeUser.optBoolean("protected") && !homeUser.optBoolean("admin")))
       throw new IllegalStateException(
@@ -4946,7 +4482,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     dialog.setPanelSize(dp(330), -2);
   }
 
-  private ImageView avatar(int size) {
+  ImageView avatar(int size) {
     ImageView face = new ImageView(this);
     face.setScaleType(ImageView.ScaleType.CENTER_CROP);
     face.setBackground(ui.shape(TvUi.PANEL, 0, size));
@@ -4999,7 +4535,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options);
   }
 
-  private void loadProfileAvatar(ImageView face, String thumb) {
+  void loadProfileAvatar(ImageView face, String thumb) {
     if (thumb.isEmpty()) return;
     if (fixture && thumb.startsWith("/")) {
       loadPicture(face, "http://10.0.2.2:9010" + thumb, "");
@@ -5191,7 +4727,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     panels.clear();
   }
 
-  private TvPanel.Builder panel() {
+  TvPanel.Builder panel() {
     TvPanel.Builder builder = new TvPanel.Builder(this).setLifecycle(panels::add, panels::remove);
     if (playerView != null) {
       View anchor = getCurrentFocus();

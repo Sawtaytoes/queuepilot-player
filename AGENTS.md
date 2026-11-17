@@ -44,7 +44,10 @@ Keep every source file at 400 lines or fewer (`tools/size_check.py`, enforced in
 to a new focused file rather than growing a large one; a file listed in
 `tools/size-exceptions.txt` may shrink but never pass its ceiling. New and redesigned screens are
 Kotlin with Compose for TV; moving existing Java is a pure move, and converting it to Kotlin is
-a separate commit. Code decisions are in `docs/decisions/`.
+a separate commit. `python3 tools/move_check.py <base>` compares each moved member of `MainActivity`
+with the base, token by token and in order, with each member reference resolved to the class that
+declares it; its docstring lists what else it allows and what it cannot see. It does not replace
+the build, tests, and emulator checks. Code decisions are in `docs/decisions/`.
 
 Run Android lint, ktlint, unit tests, assembleDebug, and emulator smoke checks. Model tests must
 prove restart/resume and profile isolation. Do not store generated APKs or build caches in
