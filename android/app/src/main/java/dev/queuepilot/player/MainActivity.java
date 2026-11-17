@@ -46,7 +46,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   android.net.ConnectivityManager.NetworkCallback networkCallback;
   final Deque<Screen> history = new ArrayDeque<>();
-  private final Map<Screen, String> focusMemory = new HashMap<>();
+  final Map<Screen, String> focusMemory = new HashMap<>();
   final StoryOrder demo = StoryOrder.demo();
   TvUi ui;
   ProfileStore store;
@@ -225,11 +225,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         : profile.optString("name");
   }
 
-  private String server() {
+  String server() {
     return profile == null ? "" : profile.optString("server");
   }
 
-  private String token() {
+  String token() {
     return profile == null ? "" : profile.optString("token");
   }
 
@@ -283,7 +283,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       case "queues" -> watchingScreen.queues();
       case "fullqueue" -> fullQueueScreen.fullQueue(screen.path(), screen.title());
       case "history" -> historyScreen.history();
-      case "search" -> search(screen);
+      case "search" -> searchScreen.search(screen);
       default -> homeScreen.drawHome();
     }
   }
@@ -1108,7 +1108,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
    * A poster card. {@code index} is its place in a paged grid, or -1; opening a grid poster
    * remembers it, so Back restores the grid around it.
    */
-  private View poster(PlexCatalog.Entry entry, int index) {
+  View poster(PlexCatalog.Entry entry, int index) {
     LinearLayout card = ui.column();
     card.setPadding(dp(3), dp(3), dp(3), dp(10));
     int width = itemWidth(columns(5));
@@ -1349,7 +1349,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
   }
 
-  private LinearLayout horizontalIn(LinearLayout parent) {
+  LinearLayout horizontalIn(LinearLayout parent) {
     HorizontalScrollView scroll = new HorizontalScrollView(this);
     scroll.setHorizontalScrollBarEnabled(false);
     scroll.setClipToPadding(false);
@@ -3745,219 +3745,20 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         });
   }
 
-  // Search: Plex's /hubs/search, grouped into Movies, Shows, and Episodes.
+  final SearchScreen searchScreen = new SearchScreen(this);
 
-  /** The last query per search screen ("" for the whole library, or a section key). */
-  private final Map<String, String> searchQueries = new HashMap<>();
-
-  private int searchSequence;
-  private EditText searchField;
-  private Runnable pendingSearch;
-
-  private final androidx.activity.result.ActivityResultLauncher<android.content.Intent> voice =
+  final androidx.activity.result.ActivityResultLauncher<android.content.Intent> voice =
       registerForActivityResult(
           new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
           result -> {
-            if (result.getData() == null || searchField == null || !searchField.isAttachedToWindow())
+            if (result.getData() == null || searchScreen.searchField == null || !searchScreen.searchField.isAttachedToWindow())
               return;
             ArrayList<String> heard =
                 result
                     .getData()
                     .getStringArrayListExtra(android.speech.RecognizerIntent.EXTRA_RESULTS);
-            if (heard != null && !heard.isEmpty()) searchField.setText(heard.get(0));
+            if (heard != null && !heard.isEmpty()) searchScreen.searchField.setText(heard.get(0));
           });
-
-  private boolean isVoiceAvailable() {
-    return !getPackageManager()
-        .queryIntentActivities(
-            new android.content.Intent(android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH), 0)
-        .isEmpty();
-  }
-
-  private void search(Screen screen) {
-    String section = screen.path(), sectionTitle = screen.title();
-    shell("Search");
-    heading(section.isEmpty() ? "Your library" : sectionTitle, "Search");
-    if (profile == null) {
-      status.setText("Sign in to search your library.");
-      return;
-    }
-    status.setText(
-        section.isEmpty() ? "Movies, shows, and episodes" : "Titles in " + sectionTitle);
-    LinearLayout bar = ui.row();
-    bar.setGravity(Gravity.CENTER_VERTICAL);
-    EditText field = new EditText(this);
-    searchField = field;
-    field.setSingleLine(true);
-    field.setInputType(InputType.TYPE_CLASS_TEXT);
-    // The keyboard stays below the field, so the results above it stay in view.
-    field.setImeOptions(
-        android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
-            | android.view.inputmethod.EditorInfo.IME_FLAG_NO_EXTRACT_UI
-            | android.view.inputmethod.EditorInfo.IME_FLAG_NO_FULLSCREEN);
-    field.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, TvUi.typeSize(18) * ui.scale);
-    field.setTextColor(TvUi.WHITE);
-    field.setHintTextColor(TvUi.MUTED);
-    field.setHint("Search titles");
-    field.setContentDescription("Search titles");
-    field.setPadding(dp(16), dp(12), dp(16), dp(12));
-    ui.withIcon(field, R.drawable.lucide_search);
-    field.setCompoundDrawableTintList(android.content.res.ColorStateList.valueOf(TvUi.MUTED));
-    field.setBackground(ui.shape(TvUi.PANEL, 0, 8));
-    field.setOnFocusChangeListener(
-        (v, focused) -> v.setBackground(ui.shape(TvUi.PANEL, focused ? TvUi.ACCENT : 0, 8)));
-    bar.addView(field, new LinearLayout.LayoutParams(dp(560), -2));
-    if (isVoiceAvailable()) {
-      TextView mic =
-          ui.button(
-              "Voice",
-              R.drawable.lucide_mic,
-              () -> {
-                try {
-                  voice.launch(
-                      new android.content.Intent(
-                              android.speech.RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                          .putExtra(
-                              android.speech.RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                              android.speech.RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                          .putExtra(android.speech.RecognizerIntent.EXTRA_PROMPT, "Say a title"));
-                } catch (Exception unavailable) {
-                  message("Search by voice", "Voice search isn't available on this device.");
-                }
-              },
-              false);
-      mic.setContentDescription("Search by voice");
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-      lp.leftMargin = dp(12);
-      bar.addView(mic, lp);
-    }
-    content.addView(bar);
-    ui.gap(content, 10);
-    LinearLayout results = ui.column();
-    content.addView(results);
-    // Back from a result draws the same results again and focuses the result that was opened.
-    boolean[] isRestoring = {
-      focusMemory.containsKey(current) && !searchQueries.getOrDefault(section, "").isEmpty()
-    };
-    android.text.TextWatcher watcher =
-        new android.text.TextWatcher() {
-          @Override
-          public void beforeTextChanged(CharSequence t, int a, int b, int c) {}
-
-          @Override
-          public void onTextChanged(CharSequence t, int a, int b, int c) {}
-
-          @Override
-          public void afterTextChanged(android.text.Editable text) {
-            if (pendingSearch != null) handler.removeCallbacks(pendingSearch);
-            String query = text.toString();
-            pendingSearch = () -> runSearch(section, query, results, isRestoring);
-            handler.postDelayed(pendingSearch, 450);
-          }
-        };
-    field.setOnEditorActionListener(
-        (v, action, event) -> {
-          boolean isSearch =
-              action == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
-                  || (event != null
-                      && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
-                      && event.getAction() == KeyEvent.ACTION_DOWN);
-          if (!isSearch) return false;
-          if (pendingSearch != null) handler.removeCallbacks(pendingSearch);
-          runSearch(section, field.getText().toString(), results, isRestoring);
-          ((android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE))
-              .hideSoftInputFromWindow(field.getWindowToken(), 0);
-          return true;
-        });
-    String saved = searchQueries.getOrDefault(section, "");
-    if (!saved.isEmpty()) {
-      field.setText(saved);
-      field.setSelection(saved.length());
-      runSearch(section, saved, results, isRestoring);
-    }
-    field.addTextChangedListener(watcher);
-    if (!isRestoring[0]) focusFirst(field);
-  }
-
-  private static final String[][] SEARCH_GROUPS = {
-    {"movie", "Movies"}, {"show", "Shows"}, {"episode", "Episodes"},
-  };
-
-  private void runSearch(String section, String query, LinearLayout results, boolean[] isRestoring) {
-    String trimmed = query.trim();
-    searchQueries.put(section, trimmed);
-    int sequence = ++searchSequence, request = generation;
-    if (trimmed.isEmpty()) {
-      results.removeAllViews();
-      status.setText(section.isEmpty() ? "Movies, shows, and episodes" : "Titles in this library");
-      return;
-    }
-    status.setText("Searching for “" + trimmed + "”…");
-    String origin = server(), secret = token();
-    String path =
-        "/hubs/search?query="
-            + PlexAccount.encode(trimmed)
-            + "&limit=30"
-            + (section.isEmpty() ? "" : "&sectionId=" + PlexAccount.encode(section));
-    network.execute(
-        () -> {
-          try {
-            JSONArray found =
-                PlexCatalog.hubs(
-                    PlexCatalog.get(PlexCatalog.url(origin, path), secret, 16 * 1024 * 1024));
-            runOnUiThread(
-                () -> {
-                  if (request != generation || sequence != searchSequence) return;
-                  View first = drawSearchResults(found, results);
-                  int count = 0;
-                  for (int i = 0; i < found.length(); i++)
-                    for (String[] group : SEARCH_GROUPS)
-                      if (group[0].equals(found.optJSONObject(i).optString("hub"))) count++;
-                  status.setText(
-                      count == 0
-                          ? "No titles match “" + trimmed + "”."
-                          : count + (count == 1 ? " result" : " results") + " for “" + trimmed + "”");
-                  if (isRestoring[0] && first != null) focusFirst(first);
-                  isRestoring[0] = false;
-                });
-          } catch (Exception e) {
-            runOnUiThread(
-                () -> {
-                  if (request != generation || sequence != searchSequence) return;
-                  results.removeAllViews();
-                  status.setText("Search is unavailable while your server can't be reached.");
-                  isRestoring[0] = false;
-                });
-          }
-        });
-  }
-
-  /** Movies, then Shows, then Episodes, each a row of posters. Returns the first poster. */
-  private View drawSearchResults(JSONArray found, LinearLayout results) {
-    results.removeAllViews();
-    View first = null;
-    for (String[] group : SEARCH_GROUPS) {
-      List<PlexCatalog.Entry> entries = new ArrayList<>();
-      for (int i = 0; i < found.length(); i++) {
-        JSONObject item = found.optJSONObject(i);
-        if (item != null && group[0].equals(item.optString("hub")))
-          entries.add(PlexCatalog.Entry.fromJson(item));
-      }
-      if (entries.isEmpty()) continue;
-      ui.gap(results, 18);
-      TextView heading = ui.title(group[1], 21);
-      heading.setTag("search-group");
-      results.addView(heading);
-      ui.gap(results, 12);
-      LinearLayout row = horizontalIn(results);
-      for (PlexCatalog.Entry entry : entries) {
-        View card = poster(entry, -1);
-        row.addView(card);
-        if (first == null) first = card;
-      }
-    }
-    return first;
-  }
 
   void message(String title, String text) {
     TvPanel d = panel().setTitle(title).setMessage(text).setPositiveButton("Close", null).create();
