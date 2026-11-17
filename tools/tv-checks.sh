@@ -36,6 +36,7 @@ check cold_start_smoke.py
 check restyle_smoke.py
 check library_smoke.py
 check playback_smoke.py
+check conversion_smoke.py
 check layout_smoke.py
 check layout_smoke.py --density-320
 if ((${#failed[@]})); then

@@ -103,4 +103,18 @@ execFileSync("ffmpeg", [
   "-c", "copy", "-c:s", "mov_text", "-movflags", "+faststart",
   "-y", resolve(output, "tracks.mp4"),
 ]);
+// A WMV file in an ASF container, which Media3 cannot open, exercises "When a file can't play
+// directly". The HLS copy of sample.mp4 stands in for Plex's universal transcoder output.
+execFileSync("ffmpeg", [
+  "-hide_banner", "-loglevel", "error", "-i", resolve(output, "sample.mp4"),
+  "-vf", "scale=640:360", "-c:v", "wmv2", "-b:v", "600k", "-c:a", "wmav2", "-b:a", "96k",
+  "-y", resolve(output, "unplayable.wmv"),
+]);
+await mkdir(resolve(output, "conversion"), { recursive: true });
+execFileSync("ffmpeg", [
+  "-hide_banner", "-loglevel", "error", "-i", resolve(output, "sample.mp4"),
+  "-c", "copy", "-bsf:v", "h264_mp4toannexb", "-f", "hls", "-hls_time", "6",
+  "-hls_list_size", "0", "-hls_segment_filename", resolve(output, "conversion", "segment-%d.ts"),
+  "-y", resolve(output, "conversion", "index.m3u8"),
+]);
 console.log(output);

@@ -49,21 +49,109 @@ final class PlaybackTracks {
 
   /**
    * Saves the viewer's choice for this profile with {@code PUT /library/parts/<id>}, the request
-   * Plex's own players send; {@code streamId} 0 turns subtitles off. Call off the main thread.
+   * Plex's own players send; {@code streamId} 0 turns subtitles off. Returns whether Plex accepted
+   * it. Call off the main thread.
    */
-  static void save(String origin, String token, String partId, int plexType, long streamId) {
-    if (partId.isEmpty() || !partId.matches("[0-9]+") || streamId < 0) return;
+  static boolean save(String origin, String token, String partId, int plexType, long streamId) {
+    if (partId.isEmpty() || !partId.matches("[0-9]+") || streamId < 0) return false;
     try {
       PlexCatalog.put(
           PlexCatalog.url(
               origin, "/library/parts/" + partId + "?" + PlexTracks.saveQuery(plexType, streamId)),
           token);
+      return true;
     } catch (Exception failed) {
       android.util.Log.w("QueuePilotTracks", "The stream choice was not saved: " + failed);
+      return false;
     }
   }
 
+  /**
+   * The choice for a server conversion. The converted stream holds only the streams Plex chose, so
+   * only a subtitle file beside the media is still picked here, {@code sidecar} (null is none); an
+   * embedded subtitle is burned into the picture by the server.
+   */
+  PlaybackTracks forConversion(PlexTracks.Stream sidecar) {
+    List<PlexTracks.Stream> external = new ArrayList<>();
+    for (PlexTracks.Stream s : streams) if (s.isExternal()) external.add(s);
+    PlexTracks.Stream subtitle = sidecar != null && sidecar.isExternal() ? sidecar : null;
+    PlaybackTracks converted =
+        new PlaybackTracks(external, new PlexTracks.Choice(null, subtitle, choice.isFromPlex()));
+    converted.frameRate = frameRate();
+    return converted;
+  }
+
+  /**
+   * The Plex id of the subtitle from inside the file that a conversion burns: the player's
+   * selection when the file opened, otherwise the planned choice, because a container the TV can't
+   * open has no tracks. 0 is an embedded subtitle whose Plex stream is not known; -1 is none.
+   */
+  long burnedSubtitleId(Tracks tracks) {
+    boolean hasText = false;
+    for (Tracks.Group group : tracks.getGroups()) {
+      if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+      hasText = true;
+      for (int i = 0; i < group.length; i++) {
+        if (!group.isTrackSelected(i)) continue;
+        String id = group.getTrackFormat(i).id;
+        if (id != null && id.contains(PlexTracks.EXTERNAL_PREFIX)) return -1;
+        return Math.max(0, streamId(tracks, C.TRACK_TYPE_TEXT, group, i));
+      }
+    }
+    return hasText ? -1 : plannedBurnedSubtitleId();
+  }
+
+  /**
+   * The subtitle file beside the media that the viewer has on now, for a conversion to keep: the
+   * player's selection when the file opened, otherwise the planned one. Null when subtitles are
+   * Off or the subtitle is inside the file, which the server burns.
+   */
+  PlexTracks.Stream shownSidecar(Tracks tracks) {
+    boolean hasText = false;
+    for (Tracks.Group group : tracks.getGroups()) {
+      if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+      hasText = true;
+      for (int i = 0; i < group.length; i++) {
+        if (!group.isTrackSelected(i)) continue;
+        String id = group.getTrackFormat(i).id;
+        if (id == null || !id.contains(PlexTracks.EXTERNAL_PREFIX)) return null;
+        long streamId = streamId(tracks, C.TRACK_TYPE_TEXT, group, i);
+        for (PlexTracks.Stream s : streams) if (s.id() == streamId && s.isExternal()) return s;
+        return null;
+      }
+    }
+    return hasText ? null : plannedSidecar();
+  }
+
+  /** The planned subtitle when it is a file beside the media, or null. */
+  PlexTracks.Stream plannedSidecar() {
+    PlexTracks.Stream subtitle = choice.subtitle();
+    return subtitle != null && subtitle.isExternal() ? subtitle : null;
+  }
+
+  /** The planned subtitle's Plex id when it is inside the file, or -1. */
+  long plannedBurnedSubtitleId() {
+    PlexTracks.Stream subtitle = choice.subtitle();
+    return subtitle != null && !subtitle.isExternal() ? subtitle.id() : -1;
+  }
+
+  /** True when the player shows a subtitle from inside the file, which a conversion must burn. */
+  static boolean isEmbeddedTextSelected(Tracks tracks) {
+    for (Tracks.Group group : tracks.getGroups()) {
+      if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+      for (int i = 0; i < group.length; i++) {
+        String id = group.getTrackFormat(i).id;
+        if (group.isTrackSelected(i) && (id == null || !id.contains(PlexTracks.EXTERNAL_PREFIX)))
+          return true;
+      }
+    }
+    return false;
+  }
+
+  private double frameRate = -1;
+
   double frameRate() {
+    if (frameRate >= 0) return frameRate;
     return PlexTracks.frameRate(streams);
   }
 

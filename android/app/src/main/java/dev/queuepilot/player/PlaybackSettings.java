@@ -56,6 +56,8 @@ final class PlaybackSettings {
       "Skip back · " + SkipIntervals.label(back(prefs)),
       "Match frame rate · " + (isFrameRateMatched(prefs) ? "On" : "Off"),
       "Subtitle size and background",
+      "When a file can't play directly · "
+          + ServerConversion.label(prefs.getString(ServerConversion.PREFERENCE_KEY, null)),
     };
     TvPanel panel =
         panels
@@ -68,7 +70,8 @@ final class PlaybackSettings {
                   R.drawable.lucide_fast_forward,
                   R.drawable.lucide_rewind,
                   R.drawable.lucide_monitor_play,
-                  R.drawable.lucide_captions
+                  R.drawable.lucide_captions,
+                  R.drawable.lucide_server_cog
                 })
             .setItems(
                 rows,
@@ -86,7 +89,8 @@ final class PlaybackSettings {
                             forwardLong(prefs));
                     case 2 -> skip("Skip back", SkipIntervals.BACK_KEY, back(prefs));
                     case 3 -> frameRate();
-                    default -> captions();
+                    case 4 -> captions();
+                    default -> unplayable();
                   }
                 })
             .setNegativeButton("Close", null)
@@ -143,6 +147,29 @@ final class PlaybackSettings {
             .create();
     panel.show();
     panel.setPanelSize(new TvUi(activity).dp(400), -2);
+  }
+
+  private void unplayable() {
+    TvPanel panel =
+        panels
+            .get()
+            .setTitle("When a file can't play directly")
+            .setMessage(
+                "Some files use a format this TV can't play. The server can convert them while"
+                    + " you watch, or playback can stop so you can fix the file first.")
+            .setSelected(
+                ServerConversion.index(prefs.getString(ServerConversion.PREFERENCE_KEY, null)))
+            .setItems(
+                ServerConversion.LABELS,
+                (d, i) -> {
+                  prefs.edit().putString(ServerConversion.PREFERENCE_KEY, ServerConversion.MODES[i]).apply();
+                  onChanged.run();
+                  show();
+                })
+            .setNegativeButton("Back", (d, i) -> show())
+            .create();
+    panel.show();
+    panel.setPanelSize(new TvUi(activity).dp(420), -2);
   }
 
   /**

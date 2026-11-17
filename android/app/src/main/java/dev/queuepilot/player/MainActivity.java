@@ -102,6 +102,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private final RewindOnResume rewind = new RewindOnResume();
   /** The playing part's Plex streams and the choice made from them, or null. */
   private PlaybackTracks playbackTracks;
+  /** The server conversion the player is streaming, or null when it plays the file directly. */
+  private ConversionSession conversion;
+  /** True once the playing item has asked what to do about a file that can't play directly. */
+  private boolean isDirectPlayHandled;
   /** Each profile's plex.tv language settings, read once and kept in memory. */
   private final Map<String, PlexTracks.Languages> accountLanguages =
       new java.util.concurrent.ConcurrentHashMap<>();
@@ -1734,6 +1738,16 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             if (player == null) return;
             if (playbackTracks != null) playbackTracks.apply(player, tracks);
             matchFrameRate();
+            // A file can open and still have no video or audio this TV decodes.
+            boolean hasVideo = tracks.containsType(androidx.media3.common.C.TRACK_TYPE_VIDEO),
+                hasAudio = tracks.containsType(androidx.media3.common.C.TRACK_TYPE_AUDIO);
+            DirectPlayFailure.Reason undecodable =
+                DirectPlayFailure.fromTracks(
+                    hasVideo && !tracks.isTypeSupported(androidx.media3.common.C.TRACK_TYPE_VIDEO),
+                    hasAudio && !tracks.isTypeSupported(androidx.media3.common.C.TRACK_TYPE_AUDIO),
+                    playingFact("videoCodec"),
+                    playingFact("audioCodec"));
+            if (undecodable != null) cannotPlayDirectly(undecodable);
           }
 
           @Override
@@ -1775,9 +1789,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           public void onPlayerError(PlaybackException error) {
             reportPlayback("error");
             overlay.setVisibility(View.VISIBLE);
-            status.setText(
-                "This file couldn't play directly. Server conversion is not available in this"
-                    + " preview.");
+            cannotPlayDirectly(
+                DirectPlayFailure.fromError(
+                    error.errorCode,
+                    playingFact("container"),
+                    playingFact("videoCodec"),
+                    playingFact("audioCodec")));
           }
         });
     player.setMediaItem(
@@ -1785,6 +1802,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             .setUri(url)
             .setMediaId(playingEntry == null ? "video" : playingEntry.key())
             .setMediaMetadata(nowPlayingMetadata(title))
+            .setMimeType(
+                ServerConversion.isConversion(url)
+                    ? androidx.media3.common.MimeTypes.APPLICATION_M3U8
+                    : null)
             .setSubtitleConfigurations(
                 playbackTracks == null
                     ? List.of()
@@ -1816,6 +1837,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             long now = android.os.SystemClock.elapsedRealtime();
             if (now - reportedAt >= 10000) {
               reportPlayback(player.isPlaying() ? "playing" : "paused");
+              if (conversion != null && !player.isPlaying()) conversion.ping(progressNetwork);
               reportedAt = now;
             }
             handler.postDelayed(this, 250);
@@ -3273,6 +3295,127 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         player.getCurrentTracks());
   }
 
+  private String playingFact(String name) {
+    return playingEntry == null ? "" : playingEntry.facts().optString(name);
+  }
+
+  /**
+   * A file this TV can't play directly: ask, convert on the server, or stop, as Settings → Playback
+   * says. Once per item; a failing conversion only says so.
+   */
+  private void cannotPlayDirectly(DirectPlayFailure.Reason reason) {
+    if (player == null) return;
+    if (conversion != null) {
+      // The converted stream failed: end the server's session instead of keeping it alive.
+      endConversion();
+      status.setText("The server's conversion stopped.");
+      return;
+    }
+    if (isDirectPlayHandled) return;
+    isDirectPlayHandled = true;
+    if (!reason.isConvertible() || playingEntry == null) {
+      status.setText("This file couldn't be played. " + reason.text());
+      return;
+    }
+    status.setText(reason.text());
+    switch (ServerConversion.mode(prefs().getString(ServerConversion.PREFERENCE_KEY, null))) {
+      case ServerConversion.CONVERT -> convertOnServer();
+      case ServerConversion.STOP -> {
+        back();
+        message("This file can't play directly", reason.text() + " Settings says to stop.");
+      }
+      default ->
+          ConversionSession.ask(
+              this,
+              panel(),
+              reason,
+              this::convertOnServer,
+              () -> {
+                back();
+                message("Stopped", reason.text());
+              });
+    }
+  }
+
+  /**
+   * Plays the item again through Plex's universal transcoder, from where it was, as the same
+   * profile. Plex's own stream choice for the part decides the converted audio; a subtitle from
+   * inside the file is burned into the picture.
+   */
+  private void convertOnServer() {
+    PlexCatalog.Entry entry = playingEntry;
+    if (player == null || entry == null) return;
+    long position = Math.max(sectionFloor, player.getCurrentPosition());
+    androidx.media3.common.Tracks current = player.getCurrentTracks();
+    long burned =
+        playbackTracks != null
+            ? playbackTracks.burnedSubtitleId(current)
+            : PlaybackTracks.isEmbeddedTextSelected(current) ? 0 : -1;
+    String partId = entry.facts().optString("partId");
+    ConversionSession session =
+        new ConversionSession(
+            playingOrigin,
+            playingToken,
+            new ServerConversion.Request(
+                entry.key(),
+                UUID.randomUUID().toString(),
+                prefs().getString("plex-client-id", ""),
+                deviceName,
+                -1,
+                burned >= 0));
+    PlaybackTracks tracks =
+        playbackTracks == null
+            ? null
+            : playbackTracks.forConversion(playbackTracks.shownSidecar(current));
+    status.setText("Asking the server to convert this file…");
+    int request = generation;
+    network.execute(
+        () -> {
+          String refusal;
+          try {
+            // Plex burns the part's stored subtitle, so the one on screen is saved first.
+            if (burned > 0
+                && !PlaybackTracks.save(
+                    session.origin, session.token, partId, PlexTracks.SUBTITLE, burned)) {
+              refusal = "Plex didn't save the subtitle to burn into the picture.";
+            } else {
+              ServerConversion.Decision decision = session.decide();
+              refusal = decision.isPlayable() ? null : decision.text();
+            }
+          } catch (Exception e) {
+            refusal = e.getMessage() == null ? "" : e.getMessage();
+          }
+          String reason = refusal;
+          runOnUiThread(
+              () -> {
+                if (request != generation || player == null) return;
+                if (reason != null) {
+                  status.setText("The server can't convert this file.");
+                  message(
+                      "The server can't convert this file",
+                      reason.isEmpty() ? "Plex refused the conversion." : reason);
+                  return;
+                }
+                boolean wasAdvancing = advancing;
+                advancing = true; // Not a stop: the same item continues.
+                playbackTracks = tracks;
+                startPlayer(session.url(), session.token, entry.title(), entry.cast());
+                advancing = wasAdvancing;
+                // Set after startPlayer, whose release of the direct player ends no conversion.
+                conversion = session;
+                player.seekTo(position);
+                status.setText("Converting on the server");
+              });
+        });
+  }
+
+  /** Ends the server's conversion session, if one is playing. */
+  private void endConversion() {
+    if (conversion == null) return;
+    conversion.stop(progressNetwork);
+    conversion = null;
+  }
+
   /** Text subtitles follow Android's caption settings; ASS keeps its own styles. */
   private void applyCaptionStyle() {
     androidx.media3.ui.SubtitleView subtitles =
@@ -3324,7 +3467,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void reportPlayback(String state, boolean isDurable) {
     if (player == null || playingEntry == null) return;
     long position = Math.max(0, player.getCurrentPosition()),
-        duration = Math.max(0, player.getDuration());
+        duration = Math.max(0, playingDuration());
     String origin = playingOrigin, secret = playingToken, key = playingEntry.key();
     JSONObject plan = nativePlan;
     if (plan != null) {
@@ -3840,6 +3983,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void releasePlayer() {
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     DisplayModeSwitch.clear(getWindow());
+    isDirectPlayHandled = false;
+    endConversion();
     skipButton = null;
     seekPreview = null;
     seekIndex = null;

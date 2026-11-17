@@ -36,8 +36,13 @@ STREAM_CHOICES={'selected':{'audio':9002,'subtitle':9004},'external':{'audio':90
 EXTERNAL_SRT='1\n00:00:00,000 --> 00:00:29,000\nSidecar line\n'
 # Chapters for the 30-second clip, each with a chapter image.
 CHAPTERS=''.join(f'<Chapter id="{80+i}" index="{i+1}" tag="{tag}" startTimeOffset="{start}" endTimeOffset="{end}" thumb="/library/media/1102/chapterImages/{i+1}"/>' for i,(tag,start,end) in enumerate([('Opening',0,10000),('The relay',10000,20000),('Closing',20000,30000)]))
+# The universal transcoder refuses with a 2000-series code, as Plex does when conversion is off.
+conversion_refused=False
+CONVERSION='/video/:/transcode/universal'
 def plex_media():
-    """The episode's Media element: plain for sample.mp4, with Plex streams for tracks.mkv."""
+    """The episode's Media element: plain for sample.mp4, with Plex streams for tracks.mkv, and
+    a WMV file's facts for unplayable.wmv."""
+    if video_fixture=='unplayable.wmv':return '<Media container="asf" videoCodec="wmv2" audioCodec="wmav2"><Part id="1102" container="asf" key="/video/sample.mp4"/></Media>'
     if not plex_tracks:return '<Media><Part id="1102" indexes="sd" key="/video/sample.mp4"/></Media>'
     def sel(kind,ident):return ' selected="1"' if stream_choice.get(kind)==ident else ''
     streams=('<Stream id="9000" streamType="1" index="0" codec="h264" frameRate="30.000"/>'
@@ -229,16 +234,18 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data,str): data=data.encode()
         self.send_response(code); self.send_header('Content-Type',mime); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers, plex_tracks, stream_choice
+        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers, plex_tracks, stream_choice, conversion_refused
         path=urlparse(self.path).path
         if path=='/_offline': offline=True; self.respond('ok');return
         if path=='/_ass': video_fixture='styled.mkv';self.respond('ok');return
         if path=='/_tracks': video_fixture='tracks.mkv';self.respond('ok');return
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
         if path=='/_markers': markers=True;self.respond('ok');return
+        if path=='/_unplayable': video_fixture='unplayable.wmv';self.respond('ok');return
+        if path=='/_conversion_refused': conversion_refused=True;self.respond('ok');return
         if path.startswith('/_plex_tracks/'):
             plex_tracks=path.split('/')[-1];stream_choice=dict(STREAM_CHOICES[plex_tracks]);video_fixture='tracks.mkv';stream_saves.clear();self.respond('ok');return
-        if path=='/_online': plex_tracks='';stream_choice.clear();video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
+        if path=='/_online': conversion_refused=False;plex_tracks='';stream_choice.clear();video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
         if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();queue_adds.clear();unlocks.clear();native_calls.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_unlock_reset':unlocks.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
@@ -320,7 +327,7 @@ class Handler(BaseHTTPRequestHandler):
                 if any(e['id']==value['id'] for e in native_events):self.respond(json.dumps({'ok':True,'duplicate':True,'cursor':plan['cursor']}),'application/json');return
                 if value['sequence']<=plan['sequence'] or value['index']!=plan['cursor']:
                     self.respond(json.dumps({'error':'Stale or out-of-order event'}),'application/json',409);return
-                native_events.append(value);plan['sequence']=value['sequence']
+                native_events.append(dict(value,setId=plan['setId']));plan['sequence']=value['sequence']
                 if value['state'] in ('ended','skip','section-end'):plan['cursor']+=1
                 native_resume[plan['setId']]=plan['cursor'] if plan['cursor']<len(plan['items']) else 0
                 self.respond(json.dumps({'ok':True,'cursor':plan['cursor']}),'application/json');return
@@ -437,11 +444,25 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(bif(),'application/octet-stream');return
         if path=='/photo/:/transcode':
             width=int(parse_qs(parsed.query).get('width',['240'])[0]);art=parse_qs(parsed.query).get('url',[''])[0];name=art.split('/')[-1] if art in ('/art/nadia.jpg','/art/omar.jpg',EXTERNAL_PORTRAIT) else ('high.jpg' if width>240 else 'low.jpg');data=(ROOT/name).read_bytes();self.respond(data,'image/jpeg');return
+        if path==CONVERSION+'/decision':
+            if conversion_refused:self.respond('<MediaContainer size="0" generalDecisionCode="2000" generalDecisionText="Conversion is turned off on this server." transcodeDecisionCode="2000"/>');return
+            self.respond('<MediaContainer size="1" generalDecisionCode="1001" generalDecisionText="Direct play not available; Conversion OK." transcodeDecisionCode="1001" transcodeDecisionText="Video and audio are being converted." mdeDecisionCode="1001"/>');return
+        if path==CONVERSION+'/start.m3u8':
+            # Like Plex: a master playlist that names the session's media playlist.
+            session=parse_qs(parsed.query).get('session',[''])[0]
+            self.respond(f'#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=4000000,RESOLUTION=1280x720,CODECS="avc1.64001f,mp4a.40.2"\nsession/{session}/base/index.m3u8\n','application/vnd.apple.mpegurl');return
+        if path.startswith(CONVERSION+'/session/'):
+            name=path.rsplit('/',1)[-1];file=ROOT/'conversion'/name
+            if '/' in name or not file.is_file():self.respond('missing',code=404);return
+            try:self.respond(file.read_bytes(),'application/vnd.apple.mpegurl' if name.endswith('.m3u8') else 'video/mp2t')
+            except (BrokenPipeError,ConnectionResetError):pass
+            return
+        if path in (CONVERSION+'/ping',CONVERSION+'/stop'):self.respond('');return
         if path=='/video/sample.mp4':
             data=(ROOT/video_fixture).read_bytes();start=0;end=len(data)-1;range_header=self.headers.get('Range','')
             if range_header.startswith('bytes='):
                 values=range_header[6:].split('-');start=int(values[0]);end=int(values[1]) if values[1] else end
-            self.send_response(206 if range_header else 200);self.send_header('Content-Type','video/x-matroska' if video_fixture.endswith('.mkv') else 'video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1));
+            self.send_response(206 if range_header else 200);self.send_header('Content-Type','video/x-matroska' if video_fixture.endswith('.mkv') else 'video/x-ms-asf' if video_fixture.endswith('.wmv') else 'video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1));
             if range_header:self.send_header('Content-Range',f'bytes {start}-{end}/{len(data)}')
             self.end_headers()
             try:self.wfile.write(data[start:end+1])

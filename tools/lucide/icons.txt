@@ -58,3 +58,4 @@ bookmark
 fast-forward
 rewind
 monitor-play
+server-cog

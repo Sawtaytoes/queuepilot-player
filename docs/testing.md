@@ -56,7 +56,7 @@ blocks the browser remote. It then installs the checkout's debug APK, starts
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
 `rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `household_smoke.py`,
-`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `playback_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
+`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `playback_smoke.py`, `conversion_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
@@ -237,6 +237,19 @@ already playing saving nothing; queues using the plan's `languages` when Plex se
 setting); and a queue that plays as Grace saving its choice with Grace's grant while Ada is
 chosen. Every check that presses Play on
 the episode now answers the resume question.
+
+`conversion_smoke.py` follows it. `POST /_unplayable` makes episode 102 a WMV file in an ASF
+container (`unplayable.wmv`), which Media3 cannot open, with Plex's `container="asf"` facts. The
+fixture answers Plex's universal transcoder: `decision` returns `generalDecisionCode="1001"`, or
+2000 with a reason after `POST /_conversion_refused`; `start.m3u8` returns a master playlist that
+names the session's media playlist, served from the HLS copy of `sample.mp4` in
+`fixtures/conversion/`; `ping` and `stop` are recorded. The check covers: the setting's default of
+Ask; the panel with the reason and both buttons; conversion from the resume point, as Ada, with the
+same parameters for `decision` and `start.m3u8`, no `offset`, and no token in the address;
+`stop` with the same session on leaving; Stop so I can fix the file, with no conversion; the Stop
+and Convert on the server settings; Plex's refusal text; and a queue that plays as Grace converting
+with Grace's grant, reporting to its own QueuePilot session (the fixture tags each event with its
+queue) and sending no Plex timeline of its own. `tools/generate-fixtures.mjs` makes both fixtures.
 
 ## Performance probe
 

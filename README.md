@@ -206,6 +206,20 @@ style: size, font, color, and background, from the device's caption settings, wh
 **Settings → Playback → Subtitle size and background** opens. Styled ASS subtitles keep their
 own look.
 
+**When a file can't play directly** (Settings → Playback) decides what happens when this TV
+can't open a file or decode its video or audio. **Ask** (the default) shows the reason, such as
+"This TV can't open WMV files like this one.", with two buttons: **Convert on the server** and
+**Stop so I can fix the file**. **Convert on the server** and **Stop** do that without asking.
+Conversion uses Plex's universal transcoder: the app asks Plex's `decision` endpoint first, then
+plays HLS with H.264 video and AAC, AC3, E-AC3, or MP3 audio, copying streams the TV can play.
+It continues from the same point, as the same profile (a queue item converts with the queue
+profile's grant), so watch progress and scrobbling reach the right account. Plex's selected
+audio is converted; a subtitle from inside the file is burned into the picture, after the app
+saves it as the profile's choice, because Plex burns the stored one (if Plex refuses that save,
+nothing is converted). A subtitle file beside the media stays as you had it. A paused conversion is kept
+alive, and leaving the player or a failure of the converted stream ends it on the server. If Plex refuses, its
+reason is shown. A network failure is never offered for conversion.
+
 **Settings → Playback** holds these options, and the player's options menu opens the same panel
 as **Playback settings**, so they are one press away while watching.
 Plex intro and credits markers show **Skip Intro** or **Skip Credits** at the bottom right
@@ -229,8 +243,8 @@ styles, positioned signs, drawings and animation. See [ASS rendering](docs/ass-r
 for its resource bounds and seek limitations.
 See [native sessions](docs/native-sessions.md).
 
-This preview does not negotiate transcoding, import real story
-ordering manifests, or download media. External ASS and ASS in other containers remain
+This preview converts on the server only when a file can't play directly; it does not lower
+quality for a slow network. It does not import real story ordering manifests, or download media. External ASS and ASS in other containers remain
 outside the custom renderer. HDR conversion, Dolby Vision, and passthrough still need
 explicit device evidence.
 Library grids request pages of about 48 items, always whole rows. Demo Episode 9 → OVA → Episode 10 ordering and
@@ -267,7 +281,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.6.0.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.6.1.md).
 `tools/perf_probe.py` measures start time, frames, memory, and main-thread work in the
 emulator; see [performance](docs/performance-2026-11.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
