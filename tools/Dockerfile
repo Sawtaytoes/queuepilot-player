@@ -6,4 +6,4 @@ ENV PATH=/opt/android-sdk/cmdline-tools/latest/bin:/opt/android-sdk/platform-too
 RUN yes | sdkmanager --licenses >/dev/null && sdkmanager 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' 'emulator' 'system-images;android-30;android-tv;x86'
 RUN curl -fsSLo /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.13-bin.zip && curl -fsSLo /tmp/gradle.sha256 https://services.gradle.org/distributions/gradle-8.13-bin.zip.sha256 && echo "$(cat /tmp/gradle.sha256)  /tmp/gradle.zip" | sha256sum -c - && unzip -q /tmp/gradle.zip -d /opt && mv /opt/gradle-8.13 /opt/gradle && rm /tmp/gradle.zip /tmp/gradle.sha256
 WORKDIR /source/android
-CMD ["gradle", "--no-daemon", "testDebugUnitTest", "lintDebug", "assembleDebug"]
+CMD ["gradle", "--no-daemon", "testDebugUnitTest", "lintDebug", "ktlintCheck", "assembleDebug"]

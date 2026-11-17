@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Static checks for the TV theme and Display size; needs no emulator.
 
-1. No color literal in the player's Java outside TvTheme.java: no 8-digit hex int, no
-   Color.rgb/argb/parseColor/valueOf, and no named Color constant except TRANSPARENT.
+1. No color literal in the player's Java or Kotlin outside TvTheme.java. Java: no 8-digit hex int,
+   no Color.rgb/argb/parseColor/valueOf, and no named Color constant except TRANSPARENT. Kotlin:
+   tools/kotlin_colors.py, which also refuses Compose's named colors and factories, and allows
+   Color(...) only in QueuePilotTvTheme.kt around one TvTheme constant. Both source roots are
+   read, src/main/java and src/main/kotlin, at any depth.
    AssMatroskaExtractor, AssCueIndex and BifIndex parse binary formats whose element IDs and
    sentinels look like colors, so they are skipped; the subtitle renderer takes its colors from
    the subtitle file.
@@ -15,13 +18,18 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import kotlin_colors  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 JAVA = ROOT / 'android/app/src/main/java/dev/queuepilot/player'
+SOURCE_ROOTS = [ROOT / 'android/app/src/main/java', ROOT / 'android/app/src/main/kotlin']
 RES = ROOT / 'android/app/src/main/res'
 BINARY_FORMATS = {'AssMatroskaExtractor.java', 'AssCueIndex.java', 'BifIndex.java'}
 HEX = re.compile(r'\b0x[0-9a-fA-F]{8}\b(?![lL])')
 CALL = re.compile(r'\bColor\.(rgb|argb|parseColor|valueOf|pack)\s*\(')
 NAMED = re.compile(r'\bColor\.(?!TRANSPARENT\b)([A-Z][A-Z_]+)\b')
+COMPOSE_THEME = 'QueuePilotTvTheme.kt'
 failures = []
 
 theme = (JAVA / 'TvTheme.java').read_text()
@@ -29,8 +37,17 @@ theme_colors = {int(v, 16) & 0xFFFFFF for v in re.findall(r'0x[fF]{2}([0-9a-fA-F
 if not theme_colors:
     failures.append('TvTheme.java declares no colors')
 
-for path in sorted(JAVA.glob('*.java')):
+if not (JAVA / COMPOSE_THEME).is_file():
+    failures.append(f'{COMPOSE_THEME} is missing; Compose screens take their colors from it')
+sources = sorted(path for root in SOURCE_ROOTS if root.is_dir()
+                 for pattern in ('*.java', '*.kt') for path in root.rglob(pattern))
+for path in sources:
     if path.name == 'TvTheme.java' or path.name in BINARY_FORMATS:
+        continue
+    if path.suffix == '.kt':
+        for number, found in kotlin_colors.findings(path.name, path.read_text(),
+                                                    path.name == COMPOSE_THEME):
+            failures.append(f'{path.name}:{number}: color literal {found!r}; use TvTheme')
         continue
     for number, line in enumerate(path.read_text().splitlines(), 1):
         code = line.split('//', 1)[0]
@@ -69,5 +86,5 @@ for fragment in ('DEFAULT_PERCENT = AUTO', 'DEFAULT_SCREEN_INCHES = 55', 'DEFAUL
 if failures:
     print('\n'.join(failures))
     sys.exit(1)
-print(f'PASS: no color literal outside TvTheme ({len(theme_colors)} theme colors), XML colors are theme '
+print(f'PASS: no color literal in Java or Kotlin outside TvTheme ({len(theme_colors)} theme colors), XML colors are theme '
       f'colors, and Auto is {auto(97, 6.5)}% for 97 in at 6.5 ft and {auto(55, 9)}% by default', flush=True)

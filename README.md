@@ -97,7 +97,8 @@ season's episode list start with the same facts for that show or season.
 **Look.** The colors, radii, and type are the QueuePilot web app's: Charcuterie's `daylight`
 variant in the dark scheme, with Charcuterie's categorical Lime as the accent and a 3 dp lime
 focus ring. Every color is a named token in `TvTheme.java`, the only file allowed to hold a
-color literal (`tools/theme_check.py`). The typeface is Charcuterie's Outfit, bundled from
+color literal (`tools/theme_check.py`, which reads Java and Kotlin). Compose screens take the same
+tokens through `QueuePilotTvTheme.kt`. The typeface is Charcuterie's Outfit, bundled from
 `google/fonts` under the SIL Open Font License (`tools/fonts/OFL.txt`, `tools/fonts/fetch.sh`).
 
 Icons are [Lucide](https://lucide.dev) icons, vendored as Android vector drawables from
@@ -186,16 +187,21 @@ player's default viewing sessions.
 ## Build and test
 
 The toolchain uses official Eclipse Temurin, Google Android SDK, Android TV API 30,
-Gradle 8.13, AGP 8.13.2, and Google Media3 1.11.1. The app requires Android 11 or newer.
+Gradle 8.13, AGP 8.13.2, Google Media3 1.11.1, Kotlin 2.4.10, and Jetpack Compose for TV
+(Compose bill of materials 2026.06.01, `androidx.tv:tv-material` 1.1.0). The app requires
+Android 11 or newer. The screens are Java Views today; new and redesigned screens are Kotlin
+and Compose for TV ([decision](docs/decisions/2026-11-17-the-tv-app-moves-to-kotlin-and-compose-for-tv-screen-by-screen-and-no-source-file-grows-past-a-size-limit.md)).
 Build the Docker toolchain with `docker build -t queuepilot-player-build:0.1 tools`.
 
 ```sh
 ./tools/build.sh /absolute/path/to/queuepilot-player /absolute/path/to/build-cache
 ```
 
-The build runs unit tests, lint, and `assembleDebug`. CI (`.forgejo/workflows/ci.yml`) runs the
-same three, without the native ASS library, and `tools/theme_check.py` on every pull request
-that changes more than documentation. Preserve the cache's `android`
+The build runs unit tests, Android lint, ktlint (Kotlin formatting), and `assembleDebug`. CI
+(`.forgejo/workflows/ci.yml`) runs the same four, without the native ASS library, plus
+`tools/theme_check.py` and `tools/size_check.py` on every pull request that changes more than
+documentation. `size_check.py` fails any source file over 400 lines unless
+`tools/size-exceptions.txt` lists it with a ceiling it may not pass. Preserve the cache's `android`
 directory so test updates retain their signing key. The APK is
 `android/app/build/outputs/apk/debug/app-debug.apk`.
 

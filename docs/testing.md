@@ -181,6 +181,40 @@ a restart; search from the rail grouped as Movies and Episodes, an episode added
 and Back to the same results; a search within the Archive sending `sectionId=3`; and the letter
 bar at 1080p density 320. `rail_smoke.py` now counts seven entries, Search among them.
 
+### Google TV launcher promotions
+
+On the lab emulator (`com.google.android.tvlauncher` 4.1.9, `com.google.android.tvrecommendations`
+4.1.8), the launcher sometimes comes to the front over the app after the app is stopped and
+started. Observed so far:
+
+- On 2026-11-17, a suite run failed in `display_smoke.py` when a launcher window covered the app
+  with "Free live TV channels" and the buttons See what's on and Continue.
+- Another agent's runs on the same day saw "Buy and rent movies on your TV" (Go to Shop, Dismiss)
+  and the launcher's home screen with Dismiss cards and Home, Live, and Shop tabs.
+
+What the checks do about it:
+
+- `tools/tv-checks.sh` disables `com.google.android.tvrecommendations` for each run, as an attempt
+  to remove the cause. It is not yet known whether this prevents the promotions. The run's
+  snapshot restore returns the emulator to its state from before the run. The first line of each
+  run's output lists the packages disabled before the run, so a disable left over from an earlier
+  run shows there.
+- `smoke.screen()` handles the launcher when it is in front: see the comment above
+  `PROMOTION_BUTTONS` in `tools/smoke.py`. When it acts, it logs the focused window at that moment
+  ("Launcher window: …") as a diagnostic sample. A sample names the focused window, not
+  necessarily a component that is safe or useful to disable.
+
+A probe on 2026-11-17 stopped and started the app 12 times with the recommendations package
+enabled and 12 times with it disabled. Each time it read the focused window 8 seconds after the
+launch; all 24 samples showed the app's own screen. That does not show that no promotion appeared
+at other moments, and it does not show whether disabling the package prevents them. Its component
+list for the launcher has these activities: `.MainActivity`, `.appsview.AppsViewActivity`,
+`.appsview.AddAppLinkActivity`, `.appsview.RemoveAppLinkActivity`, `.inputs.InputsPanelActivity`,
+`.notifications.NotificationsSidePanelActivity`, `.settings.HomeScreenSettingsActivity`, and
+`.settings.OpenSourceActivity`, with receivers and a provider. The recommendations package includes
+`.promos.config.ConfigurationProvider` and `.promos.server.LocaleChangeReceiver`. Which component
+shows the promotions is not yet known.
+
 ## Lucide icons
 
 The app's icons are Lucide icons converted to Android vector drawables. `tools/lucide/icons.txt`

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# The CI build: unit tests, lint, and assembleDebug. It runs inside the pinned Eclipse Temurin
-# image that tools/Dockerfile starts from, with the same Google Android SDK packages and Gradle,
-# each verified by checksum. They are kept in /cache, a Docker volume that outlives the run.
+# The CI build: unit tests, Android lint, ktlint, and assembleDebug. It runs inside the pinned
+# Eclipse Temurin image that tools/Dockerfile starts from, with the same Google Android SDK
+# packages and Gradle, each verified by checksum. They are kept in /cache, a Docker volume that outlives the run.
 #
 # The native ASS library is not built here: tools/native-build.sh needs the NDK and a long
 # compile. Its Java side still compiles and is tested. The APK this makes is a check, never a
@@ -44,4 +44,4 @@ sdkmanager="$ANDROID_HOME/cmdline-tools/$tools_version/bin/sdkmanager"
 "$sdkmanager" 'platform-tools' 'platforms;android-36' 'build-tools;36.0.0' >/dev/null
 cd "$source_directory/android"
 "$cache/gradle-$gradle_version/bin/gradle" --no-daemon --max-workers=2 \
-  testDebugUnitTest lintDebug assembleDebug
+  testDebugUnitTest lintDebug ktlintCheck assembleDebug

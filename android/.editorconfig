@@ -1,0 +1,7 @@
+# Kotlin style, read by ktlint (`gradle ktlintCheck`): Android's Kotlin style guide.
+[*.{kt,kts}]
+ktlint_code_style = android_studio
+indent_size = 4
+max_line_length = 100
+# Composable functions are named like types (Compose's own convention).
+ktlint_function_naming_ignore_when_annotated_with = Composable

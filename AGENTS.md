@@ -40,7 +40,13 @@ automatic server discovery; do not expose token entry to viewers. Do not claim n
 4K UI, verified offline Plex Home switching, faithful ASS rendering, native QueuePilot
 starts, tone-mapping quality, or passthrough without actual device evidence.
 
-Run Android lint, unit tests, assembleDebug, and emulator smoke checks. Model tests must
+Keep every source file at 400 lines or fewer (`tools/size_check.py`, enforced in CI). Add code
+to a new focused file rather than growing a large one; a file listed in
+`tools/size-exceptions.txt` may shrink but never pass its ceiling. New and redesigned screens are
+Kotlin with Compose for TV; moving existing Java is a pure move, and converting it to Kotlin is
+a separate commit. Code decisions are in `docs/decisions/`.
+
+Run Android lint, ktlint, unit tests, assembleDebug, and emulator smoke checks. Model tests must
 prove restart/resume and profile isolation. Do not store generated APKs or build caches in
 Git. Register and merge verified PRs, run the workspace personal-detail scanner, and remove
 merged worktrees. Do not install or change an active TV merely to run tests; use the emulator.

@@ -1,0 +1,14 @@
+# Source files allowed past tools/size_check.py's 400-line limit: "<path> <ceiling>".
+# A listed file may shrink, never pass its ceiling. Each entry is temporary; remove it in the
+# change that brings the file under 400 lines. The ceilings for MainActivity, PlexCatalog and the
+# fixture server leave room for feature changes that were in progress when the limit began
+# (2026-11-17); each split lowers its ceiling. Policy: docs/decisions/README.md.
+
+# Being split into one file per screen, area by area.
+android/app/src/main/java/dev/queuepilot/player/MainActivity.java 6700
+# Plex parsing; to be split by kind of object after the title-screen work lands.
+android/app/src/main/java/dev/queuepilot/player/PlexCatalog.java 600
+# The test fixture server; to be split by route group.
+tools/fixture_server.py 600
+# The QueuePilot Test supervisor (web page, emulator, input, test lock); to be split by part.
+test-environment/supervisor.py 815

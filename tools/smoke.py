@@ -5,13 +5,81 @@ from pathlib import Path
 SERIAL='emulator-5554'
 PACKAGE='dev.queuepilot.player.prototype'
 def adb(*args):return subprocess.check_output(['adb','-s',SERIAL,*args],stderr=subprocess.STDOUT,timeout=30)
-def screen():
+def dump():
+    """The active window's UI hierarchy, from the emulator-only inspector."""
     hardware=adb('shell','getprop','ro.hardware').decode().strip()
     assert hardware in ('ranchu','goldfish'),'Inspector must never target a physical TV'
     result=adb('shell','am','instrument','-w','-r','dev.queuepilot.inspector/.Dump').decode()
     match=re.search(r'INSTRUMENTATION_RESULT: xml=(.*)',result)
     if not match: raise AssertionError('UI hierarchy unavailable: '+result)
     return ET.fromstring(match.group(1))
+def screen(recovered=0):
+    """The app's screen. When the TV launcher has come to the front, see return_from_launcher."""
+    root=dump()
+    if not window_package(root).startswith(LAUNCHER_PREFIXES):return root
+    # Every attempt counts, including one skipped because the app came back on its own.
+    if recovered>=3:raise AssertionError('The TV launcher was in front of the app on three recovery attempts.\n'+shown(root))
+    return_from_launcher(root);return screen(recovered+1)
+# The Android TV launcher can come to the front over the running app after it is stopped and
+# started: a one-time promotion ("Free live TV channels", "Buy and rent movies on your TV"), or
+# its own home screen with notice cards. Its tabs share names with the app's controls ("Home"),
+# so a check must never tap it, and a check knows the launcher by its window's package, never by
+# a label. Recovery happens only while the app's own screen and process still exist beneath the
+# launcher, and must bring back that same screen and process. Anything else means the app
+# stopped, and the check fails, so a crash is never hidden.
+PROMOTION_BUTTONS=('Continue','Dismiss','Not now','No thanks')
+LAUNCHER_PREFIXES=('com.google.android.tv','com.google.android.apps.tv')
+def window_package(root):
+    node=next(root.iter('node'),None)
+    return node.get('package','') if node is not None else ''
+def shown(root):return '\n'.join(n.get('text','') for n in root.iter('node') if n.get('text','').strip())
+def focused_package():
+    found=re.search(r'mCurrentFocus=Window\{\S+ \S+ ([^/\s}]+)',adb('shell','dumpsys window | grep -m1 mCurrentFocus; true').decode())
+    return found.group(1) if found else ''
+def focused_window():
+    """The focused window as dumpsys names it, best effort: a diagnostic must never stop recovery."""
+    try:return adb('shell','dumpsys window | grep -m1 mCurrentFocus; true').decode().strip()
+    except (subprocess.CalledProcessError,subprocess.TimeoutExpired) as error:return f'unavailable ({type(error).__name__})'
+def app_process():
+    """The app's process id, or '' when it is not running."""
+    return adb('shell','pidof '+PACKAGE+'; true').decode().strip()
+def app_activity():
+    """The identity of the app's live screen in the activity manager, or '' when it has none."""
+    found=re.search(r'ActivityRecord\{(\w+) u0 '+re.escape(PACKAGE)+r'/\S*MainActivity',adb('shell','dumpsys activity activities').decode())
+    return found.group(1) if found else ''
+def return_from_launcher(root):
+    for _ in range(6):
+        # The launcher can hold focus for a moment while the app comes forward.
+        if not focused_package().startswith(LAUNCHER_PREFIXES):return
+        time.sleep(.5)
+    root=dump()
+    # Act only on a launcher window that is still in front: the app may have just come back,
+    # and its own buttons share names with the promotion's ("Continue").
+    if not window_package(root).startswith(LAUNCHER_PREFIXES) or not focused_package().startswith(LAUNCHER_PREFIXES):return
+    before,process=app_activity(),app_process()
+    if not before or not process:
+        raise AssertionError('The TV launcher is in front and the app screen or its process is gone; the app stopped.\n'+shown(root))
+    button=next((n for n in root.iter('node') if n.get('text') in PROMOTION_BUTTONS),None)
+    first=next((n.get('text') for n in root.iter('node') if n.get('text','').strip()),'')
+    print('Launcher window:',focused_window(),flush=True) # a diagnostic sample; see docs/testing.md
+    if button is None:print('The TV launcher came to the front:',first,flush=True)
+    elif not focused_package().startswith(LAUNCHER_PREFIXES):
+        # The app came back before the tap: skip it, but the checks below still prove it is the
+        # same screen and process.
+        print('The app came back before the launcher promotion was answered:',first,flush=True)
+    else:
+        print('Dismiss the TV launcher promotion:',first,'·',button.get('text'),flush=True)
+        x1,y1,x2,y2=map(int,re.findall(r'\d+',button.get('bounds')))
+        adb('shell','input','tap',str((x1+x2)//2),str((y1+y2)//2));time.sleep(1)
+    if focused_package()!=PACKAGE:launch() # the same intent brings the existing task forward
+    for _ in range(6):
+        if focused_package()==PACKAGE:break
+        time.sleep(.5)
+    else:raise AssertionError('The app did not return after the TV launcher came to the front.\n'+shown(dump()))
+    # Android keeps a stopped screen's record after its process dies and restarts the process
+    # under it, so the record alone cannot prove the app survived: the process must be the same.
+    if app_activity()!=before or app_process()!=process:
+        raise AssertionError('The app was recreated after the TV launcher came to the front; the original had stopped.')
 def has_desc(value):return any(n.get('content-desc')==value for n in screen().iter('node'))
 def text():return '\n'.join(n.get('text','') for n in screen().iter('node'))
 def contains(value):
@@ -28,7 +96,7 @@ def click(label):
         if node is None: node=next((n for n in root.iter('node') if n.get('text','').casefold()==label.casefold() and n.get('enabled')!='false'),None)
         if node is not None:
             x1,y1,x2,y2=map(int,re.findall(r'\d+',node.get('bounds')))
-            if y2>0 and y1<height:
+            if 0<=(y1+y2)//2<height: # a tap at a center off the screen does nothing; scroll instead
                 adb('shell','input','tap',str((x1+x2)//2),str((y1+y2)//2));time.sleep(.5);return
         adb('shell','input','swipe',str(int(width*.91)),str(int(height*.84)),str(int(width*.91)),str(int(height*.33)),'300');time.sleep(.3)
     raise AssertionError('Missing control: '+label+'\n'+text())
@@ -84,7 +152,10 @@ def ink(image,box):
     return sum(1 for c in colors if sum(abs(c[i]-ground[i]) for i in range(3))>90)/len(colors)
 def shot(name):Path('/fixtures/'+name+'.png').write_bytes(adb('exec-out','screencap','-p'))
 def post(path):urllib.request.urlopen(urllib.request.Request('http://127.0.0.1:9010/'+path,method='POST'),timeout=5).read()
-def launch():adb('shell','am','start','-n',PACKAGE+'/dev.queuepilot.player.MainActivity','--ez','fixture','true');time.sleep(1)
+def launch():
+    """Start the activity and wait for its first frame (am start -W); print the start time."""
+    out=adb('shell','am','start','-W','-n',PACKAGE+'/dev.queuepilot.player.MainActivity','--ez','fixture','true').decode()
+    print('Launch:',' '.join(re.findall(r'(?:LaunchState|TotalTime|WaitTime): \S+',out)),flush=True);time.sleep(1)
 def back():adb('shell','input','keyevent','4');time.sleep(.3)
 def enter_pin(value):
     assert not any(n.get('class')=='android.widget.EditText' for n in screen().iter('node'))

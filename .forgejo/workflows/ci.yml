@@ -43,8 +43,8 @@ jobs:
       # `owner/repo` against THIS host, so name the mirror.
       charcuterieRepository: sawtaytoes/charcuterie
 
-  # Unit tests, Android lint, and assembleDebug (tools/ci-build.sh), plus the
-  # theme check, which needs no emulator.
+  # Unit tests, Android lint, ktlint, and assembleDebug (tools/ci-build.sh), plus
+  # the theme and file-size checks, which need no emulator.
   android:
     needs: [changes]
     if: ${{ needs.changes.outputs.isDocsOnly != 'true' }}
@@ -52,9 +52,14 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
-      - name: Theme check
-        run: python3 tools/theme_check.py
-      - name: Unit tests, lint, and assembleDebug
+      - name: Tool tests and theme check
+        run: |
+          python3 tools/kotlin_colors_test.py
+          python3 tools/smoke_launcher_test.py
+          python3 tools/theme_check.py
+      - name: File size check
+        run: python3 tools/size_check.py
+      - name: Unit tests, lint, ktlint, and assembleDebug
         # The build container gets the same bounds as tools/build.sh. The
         # named volume keeps the SDK, Gradle, and its dependencies between runs.
         run: |

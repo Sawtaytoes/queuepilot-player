@@ -57,6 +57,17 @@ final class TvTheme {
   /** {@code categorical.4.border}. */
   static final int ACCENT_BORDER = 0xff5b7a2d;
 
+  // Danger: Charcuterie's intent.danger in the same scheme and variant (tokens at Charcuterie
+  // db44bcd). Compose's error roles use them; no View screen draws an error color yet.
+  /** {@code intent.danger.solid}. */
+  static final int DANGER_SOLID = 0xffbe3241;
+  /** {@code intent.danger.onSolid}: text and icons on {@link #DANGER_SOLID}. */
+  static final int DANGER_ON_SOLID = 0xffffffff;
+  /** {@code intent.danger.surface}. */
+  static final int DANGER_SURFACE = 0xff351920;
+  /** {@code intent.danger.content}. */
+  static final int DANGER_CONTENT = 0xfff79399;
+
   // Focus.
   /**
    * {@code categorical.4.content} as the focus ring, the proposed {@code tv} density's ring. The

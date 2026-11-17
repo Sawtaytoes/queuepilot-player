@@ -1,1 +1,9 @@
-plugins { id 'com.android.application' version '8.13.2' apply false }
+plugins {
+    id 'com.android.application' version '8.13.2' apply false
+    // Kotlin 2.4.10 supports Android Gradle plugin 8.5.2 to 9.1.0, which covers this build's
+    // 8.13.2. The Compose compiler ships with Kotlin and has its version.
+    id 'org.jetbrains.kotlin.android' version '2.4.10' apply false
+    id 'org.jetbrains.kotlin.plugin.compose' version '2.4.10' apply false
+    // ktlint checks Kotlin formatting against Android's Kotlin style guide.
+    id 'org.jlleitschuh.gradle.ktlint' version '14.2.0' apply false
+}
