@@ -155,6 +155,57 @@ URLs; a portrait the server cannot fetch is requested directly without credentia
 Profiles also show their avatars.
 **Rewind on resume** is Off by default. Choose 1, 3, 5 or 10 seconds in Settings; a stored
 choice is kept.
+
+**Audio and subtitles follow Plex.** The player plays the audio and subtitle streams that Plex
+marks `selected="1"` on the part for the profile that is playing. Plex derives that mark from the
+profile's own choice for the title and from the account's language settings on plex.tv. When
+Plex chose an audio stream but no subtitle stream, subtitles are off. Only when Plex selected
+nothing at all does the app use the playing profile's plex.tv settings (`GET /api/v2/user`,
+its `profile`): the default audio language when automatic audio selection is on, otherwise the
+file's default audio stream; and subtitles in the default subtitle language, always or only
+with audio in another language, as the account's subtitle mode says, preferring full subtitles
+to forced ones. A subtitle is never shown in another language. A library title uses the chosen
+profile's settings. A queue item uses the queue profile's settings, which the plan carries as
+`languages`, because the TV holds no plex.tv token for another profile. QueuePilot servers send
+them from server pull request 389 on; an older server omits them. A plan without them falls back to the chosen profile's settings only when the queue plays as the
+chosen profile; another profile's queue then keeps Plex's selection. The chosen profile's
+settings never apply to another profile's queue. Changing a track in the player saves it for that profile with
+`PUT /library/parts/<id>?audioStreamID=<id>&allParts=1` (or `subtitleStreamID`, 0 for Off), as
+Plex's own players do; a queue item saves with the queue profile's grant. Subtitle files beside
+the media (SRT, WebVTT, ASS) are loaded with the video so they can be chosen. Embedded ASS
+still uses the libass renderer.
+
+**Resume.** A title with a saved position asks first: **Resume from 12:34** or **Start from the
+beginning**. Resuming honors Rewind on resume. Back closes the question and plays nothing. A
+queue continues where QueuePilot says, without asking: its card already says Resume queue.
+
+**Chapters.** When Plex has chapters for the title (`includeChapters=1`), the player's top bar
+and its options menu offer **Chapters**: a panel anchored to the control that opened it, with
+each chapter's start time, name, and Plex's chapter image when the server made one. Choosing a
+chapter seeks to it, inside a queue's authored section.
+
+**Skip amounts** follow the item's length, not its kind: under an hour the forward skip is
+10 seconds, an hour or longer it is 30 seconds. Back is 10 seconds. All three are set in
+**Settings → Playback** and apply to the next video started. The remote's rewind and
+fast-forward keys use the same amounts.
+
+**Match frame rate** (On by default) asks Android for the display mode whose refresh rate is the
+video's frame rate, or a whole multiple of it, at the current resolution, through the window's
+`preferredDisplayModeId`. `Surface.setFrameRate` changes the refresh rate only when the change is
+seamless unless the app passes `CHANGE_FRAME_RATE_ALWAYS`, which needs Android 12; an HDMI mode
+change is never seamless, and the NVIDIA Shield runs Android 11. A display already at a whole
+multiple keeps its mode, so a 29.97 fps video on a 59.94 Hz display causes no switch. Leaving the
+player clears the request. The frame rate comes from Plex's video stream, else from the decoder.
+Switching has been checked only on the emulator, which offers one mode; it is not yet verified on
+a Shield.
+
+**Subtitle size and background.** Text subtitles (SRT, WebVTT and similar) use Android's caption
+style: size, font, color, and background, from the device's caption settings, which
+**Settings → Playback → Subtitle size and background** opens. Styled ASS subtitles keep their
+own look.
+
+**Settings → Playback** holds these options, and the player's options menu opens the same panel
+as **Playback settings**, so they are one press away while watching.
 Plex intro and credits markers show **Skip Intro** or **Skip Credits** at the bottom right
 while playback is inside the marker. The button takes D-pad focus without pausing; Enter
 seeks to the marker end. It hides after eight seconds unless the controls are showing, and
@@ -169,7 +220,7 @@ only when Plex reports one; a file over 32 MB or one that does not parse is igno
 time is shown alone. Queue playback keeps the preview inside the authored section.
 Player focus highlights are rounded, including the seek buttons with interval labels.
 Options use QueuePilot panels with visible selections and D-pad focus. Browsing/settings
-use a side panel; playback audio, subtitle and speed menus stay above their launching
+use a side panel; playback audio, subtitle, speed and chapter menus stay beside their launching
 controls. Back closes a panel and returns focus; playback controls stay visible while
 a menu is open. Embedded Matroska ASS uses libass with attached fonts, authored
 styles, positioned signs, drawings and animation. See [ASS rendering](docs/ass-rendering.md)
@@ -214,7 +265,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.5.9.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.6.0.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)
 without involving a household TV; `tools/tv-lab.sh test` runs them there.
 

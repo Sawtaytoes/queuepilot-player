@@ -6,7 +6,8 @@
  <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
  <uses-feature android:name="android.hardware.microphone" android:required="false"/>
  <!-- Voice search is offered only when the device has a speech recognizer to ask. -->
- <queries><intent><action android:name="android.speech.action.RECOGNIZE_SPEECH"/></intent></queries>
+ <!-- Subtitle size and background opens Android's caption settings when the device has them. -->
+ <queries><intent><action android:name="android.speech.action.RECOGNIZE_SPEECH"/></intent><intent><action android:name="android.settings.CAPTIONING_SETTINGS"/></intent></queries>
  <application android:label="QueuePilot" android:theme="@style/AppTheme" android:allowBackup="false" android:dataExtractionRules="@xml/backup_rules" android:usesCleartextTraffic="true" android:supportsRtl="true" android:icon="@android:drawable/ic_media_play" android:banner="@drawable/banner">
   <activity android:name=".MainActivity" android:exported="true" android:screenOrientation="landscape" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode">
    <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>

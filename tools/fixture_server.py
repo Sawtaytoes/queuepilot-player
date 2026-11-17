@@ -19,6 +19,34 @@ SHOW_FIELDS={'102':'grandparentTitle="Orbit Nine" parentIndex="1" parentTitle="S
 native_offline=False
 video_fixture='sample.mp4'
 markers=False
+# Plex's stream metadata for tracks.mkv: '' (none sent), 'selected' (Plex marks Commentary and
+# Signs and songs), 'external' (Plex marks a subtitle file beside the media), or 'account' (Plex
+# marks nothing, so the account's language settings decide).
+plex_tracks=''
+# What Plex marks selected; PUT /library/parts/1102 changes it, as the real server does.
+stream_choice={}
+stream_saves=[]
+# The account's plex.tv language settings: English audio when available, English subtitles
+# whenever the audio is in another language.
+ACCOUNT_PROFILE={'autoSelectAudio':True,'defaultAudioLanguage':'en','defaultSubtitleLanguage':'en','autoSelectSubtitle':1}
+# Each queue profile's plex.tv language settings, as the QueuePilot server sends them with a plan.
+# Grace's audio language is Japanese, so Japanese audio needs only her forced English subtitles.
+PROFILE_LANGUAGES={'Ada':ACCOUNT_PROFILE,'Grace':{'autoSelectAudio':True,'defaultAudioLanguage':'ja','defaultSubtitleLanguage':'en','autoSelectSubtitle':1}}
+STREAM_CHOICES={'selected':{'audio':9002,'subtitle':9004},'external':{'audio':9001,'subtitle':9005},'account':{}}
+EXTERNAL_SRT='1\n00:00:00,000 --> 00:00:29,000\nSidecar line\n'
+# Chapters for the 30-second clip, each with a chapter image.
+CHAPTERS=''.join(f'<Chapter id="{80+i}" index="{i+1}" tag="{tag}" startTimeOffset="{start}" endTimeOffset="{end}" thumb="/library/media/1102/chapterImages/{i+1}"/>' for i,(tag,start,end) in enumerate([('Opening',0,10000),('The relay',10000,20000),('Closing',20000,30000)]))
+def plex_media():
+    """The episode's Media element: plain for sample.mp4, with Plex streams for tracks.mkv."""
+    if not plex_tracks:return '<Media><Part id="1102" indexes="sd" key="/video/sample.mp4"/></Media>'
+    def sel(kind,ident):return ' selected="1"' if stream_choice.get(kind)==ident else ''
+    streams=('<Stream id="9000" streamType="1" index="0" codec="h264" frameRate="30.000"/>'
+        f'<Stream id="9001" streamType="2" index="1" codec="aac" languageCode="jpn" title="Original stereo" default="1"{sel("audio",9001)}/>'
+        f'<Stream id="9002" streamType="2" index="2" codec="aac" languageCode="jpn" title="Commentary"{sel("audio",9002)}/>'
+        f'<Stream id="9003" streamType="3" index="3" codec="srt" languageCode="eng" title="Full subtitles"{sel("subtitle",9003)}/>'
+        f'<Stream id="9004" streamType="3" index="4" codec="srt" languageCode="eng" title="Signs and songs" forced="1"{sel("subtitle",9004)}/>')
+    if plex_tracks=='external':streams+=f'<Stream id="9005" streamType="3" codec="srt" languageCode="eng" title="Sidecar" key="/library/streams/9005"{sel("subtitle",9005)}/>'
+    return f'<Media container="mkv" videoCodec="h264" audioCodec="aac"><Part id="1102" indexes="sd" container="mkv" key="/video/sample.mp4">{streams}</Part></Media>'
 # Invented films. One has a long title and summary, so the details screen must clamp both;
 # twelve fill several rows, so a smaller Display size visibly gains columns.
 LONG_TITLE='The Extraordinarily Long Voyage of the Lantern Keeper and the Seven Lighthouses Beyond the Northern Sea, Told in Twelve Winters by the Last Keeper of the Northern Light and Her Crew of Two, and of the Ice That Came After'
@@ -201,14 +229,16 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data,str): data=data.encode()
         self.send_response(code); self.send_header('Content-Type',mime); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers
+        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers, plex_tracks, stream_choice
         path=urlparse(self.path).path
         if path=='/_offline': offline=True; self.respond('ok');return
         if path=='/_ass': video_fixture='styled.mkv';self.respond('ok');return
         if path=='/_tracks': video_fixture='tracks.mkv';self.respond('ok');return
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
         if path=='/_markers': markers=True;self.respond('ok');return
-        if path=='/_online': video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
+        if path.startswith('/_plex_tracks/'):
+            plex_tracks=path.split('/')[-1];stream_choice=dict(STREAM_CHOICES[plex_tracks]);video_fixture='tracks.mkv';stream_saves.clear();self.respond('ok');return
+        if path=='/_online': plex_tracks='';stream_choice.clear();video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
         if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();queue_adds.clear();unlocks.clear();native_calls.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_unlock_reset':unlocks.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
@@ -274,11 +304,11 @@ class Handler(BaseHTTPRequestHandler):
                     native_starts.append({'setId':value['setId'],'start':start})
                     chosen=[picked]+([i for i in entry['items'] if i['position']>picked['position'] and i['state']!='watched'] if start.get('mode')=='continue' else [])
                     ident='native-fixture-'+str(len(native_sessions)+1)
-                    plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':plays_as.lower(),'profileName':plays_as,'homeServerId':'fixture-server','grants':grants(value['setId']),'sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':len(chosen),'handed':len(chosen),
+                    plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':plays_as.lower(),'profileName':plays_as,'languages':PROFILE_LANGUAGES.get(plays_as),'homeServerId':'fixture-server','grants':grants(value['setId']),'sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':len(chosen),'handed':len(chosen),
                         'items':[{'ratingKey':i['ratingKey'],'positionKey':f"{n}:home:{i['ratingKey']}",'resumeMs':0,'type':i['type'],'title':i['title'],'show':i['show'],'season':i['season'],'episode':i['episode']} for n,i in enumerate(chosen)]}
                     native_sessions[ident]=plan;self.respond(json.dumps(plan),'application/json');return
                 ident='native-fixture-'+str(len(native_sessions)+1)
-                plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':plays_as.lower(),'profileName':plays_as,'homeServerId':'fixture-server','grants':grants(value['setId']),'sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':2,'handed':2,'items':[{'ratingKey':'102','positionKey':'0:home:102','resumeMs':4000,'type':'episode','title':'The signal','show':'Orbit Nine','season':1,'episode':9},{'ratingKey':'103','positionKey':'1:home:103','resumeMs':0,'type':'episode','title':'The return','show':'Harbor Lights','season':2,'episode':3}]}
+                plan={'id':ident,'sessionKey':'fixture-session-key','setId':value['setId'],'profileUuid':plays_as.lower(),'profileName':plays_as,'languages':PROFILE_LANGUAGES.get(plays_as),'homeServerId':'fixture-server','grants':grants(value['setId']),'sequence':0,'cursor':0,'expiresAt':int(time.time()*1000)+86400000,'refill':False,'target':2,'handed':2,'items':[{'ratingKey':'102','positionKey':'0:home:102','resumeMs':4000,'type':'episode','title':'The signal','show':'Orbit Nine','season':1,'episode':9},{'ratingKey':'103','positionKey':'1:home:103','resumeMs':0,'type':'episode','title':'The return','show':'Harbor Lights','season':2,'episode':3}]}
                 plan['cursor']=native_resume.get(value['setId'],0)
                 native_sessions[ident]=plan;self.respond(json.dumps(plan),'application/json');return
             ident=path.split('/')[4];plan=native_sessions.get(ident)
@@ -312,6 +342,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         parsed=urlparse(self.path); path=parsed.path
         if path=='/_native_events':self.respond(json.dumps(native_events),'application/json');return
+        if path=='/_stream_saves':self.respond(json.dumps(stream_saves),'application/json');return
         if path=='/_native_starts':self.respond(json.dumps(native_starts),'application/json');return
         if path=='/_native_calls':self.respond(json.dumps(native_calls),'application/json');return
         if path=='/_history_requests':self.respond(json.dumps(history_requests),'application/json');return
@@ -353,7 +384,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not pin or time.monotonic()-pin['created']>pin['expiresIn']:self.respond('{}','application/json',410);return
                 if self.headers.get('X-Plex-Client-Identifier')!=pin['client']:self.respond('{}','application/json',403);return
                 self.respond(json.dumps({'authToken':'fixture-root' if pin['claimed'] else None}),'application/json');return
-            if path=='/api/v2/user' and token=='fixture-root':self.respond(json.dumps({'title':'Ada','id':1}),'application/json');return
+            if path=='/api/v2/user' and token=='fixture-root':self.respond(json.dumps({'title':'Ada','id':1,'profile':ACCOUNT_PROFILE}),'application/json');return
+            if path=='/api/v2/user' and token.startswith('fixture-user-'):self.respond(json.dumps({'title':token.removeprefix('fixture-user-').title(),'profile':ACCOUNT_PROFILE}),'application/json');return
             if path=='/api/v2/home/users' and token=='fixture-root':self.respond(json.dumps({'users':users}),'application/json');return
             if path=='/api/v2/resources' and token.startswith('fixture-user-'):
                 user=token.removeprefix('fixture-user-')
@@ -396,7 +428,9 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/library/metadata/103':
             self.respond(f'<MediaContainer><Video ratingKey="103" parentRatingKey="201" grandparentRatingKey="200" {SHOW_FIELDS["103"]} type="episode" index="3" title="The return" duration="30000" thumb="/art/poster.jpg"><Media><Part id="1103" indexes="sd" key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira (flashback)" thumb="/art/nadia.jpg"/></Video></MediaContainer>');return
         if path=='/library/metadata/102':
-            self.respond(f'<MediaContainer><Video ratingKey="102" parentRatingKey="101" grandparentRatingKey="100" {SHOW_FIELDS["102"]} type="episode" index="9" title="The signal" duration="30000" viewOffset="{60000 if video_fixture.endswith("styled.mkv") else 4000}" thumb="/art/poster.jpg"><Media><Part id="1102" indexes="sd" key="/video/sample.mp4"/></Media><Director tag="Lena Hart"/>{MARKERS if markers and parse_qs(parsed.query).get("includeMarkers")==["1"] else ""}</Video></MediaContainer>');return
+            self.respond(f'<MediaContainer><Video ratingKey="102" parentRatingKey="101" grandparentRatingKey="100" {SHOW_FIELDS["102"]} type="episode" index="9" title="The signal" duration="{240000 if video_fixture.endswith("styled.mkv") else 30000}" viewOffset="{60000 if video_fixture.endswith("styled.mkv") else 4000}" thumb="/art/poster.jpg">{plex_media()}<Director tag="Lena Hart"/>{MARKERS if markers and parse_qs(parsed.query).get("includeMarkers")==["1"] else ""}{CHAPTERS if plex_tracks and parse_qs(parsed.query).get("includeChapters")==["1"] else ""}</Video></MediaContainer>');return
+        if path=='/library/streams/9005' and plex_tracks=='external':
+            self.respond(EXTERNAL_SRT,'application/x-subrip');return
         if path=='/library/metadata/302':
             self.respond(GLASS_CITY);return
         if path in ('/library/parts/1102/indexes/sd','/library/parts/1103/indexes/sd'):
@@ -414,4 +448,15 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError,ConnectionResetError):pass
             return
         self.respond('missing',code=404)
+def do_PUT(self):
+    """PUT /library/parts/<id>: Plex saves the profile's audio and subtitle choice for the part."""
+    parsed=urlparse(self.path);path=parsed.path;query=parse_qs(parsed.query);token=self.headers.get('X-Plex-Token','')
+    profile={'fixture-ada':'ada','fixture-grace':'grace','fixture-morgan':'morgan'}.get(token,'unknown')
+    if profile=='unknown':self.respond('denied',code=401);return
+    if path!='/library/parts/1102':self.respond('missing',code=404);return
+    stream_saves.append({'path':path,'query':query,'profile':profile})
+    if 'audioStreamID' in query:stream_choice['audio']=int(query['audioStreamID'][0])
+    if 'subtitleStreamID' in query:stream_choice['subtitle']=int(query['subtitleStreamID'][0])
+    self.respond('')
+Handler.do_PUT=do_PUT
 if __name__=='__main__':ThreadingHTTPServer(('0.0.0.0',9010),Handler).serve_forever()

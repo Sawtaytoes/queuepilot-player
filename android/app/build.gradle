@@ -7,7 +7,7 @@ plugins {
 android {
     namespace 'dev.queuepilot.player'
     compileSdk 36
-    defaultConfig { applicationId 'dev.queuepilot.player.prototype'; minSdk 30; targetSdk 36; versionCode 14; versionName '0.5.9-preview' }
+    defaultConfig { applicationId 'dev.queuepilot.player.prototype'; minSdk 30; targetSdk 36; versionCode 15; versionName '0.6.0-preview' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildFeatures { compose true }
     sourceSets.main.jniLibs.srcDirs = ['build/native-libs']

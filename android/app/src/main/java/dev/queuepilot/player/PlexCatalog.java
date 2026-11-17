@@ -187,6 +187,24 @@ final class PlexCatalog {
     }
   }
 
+  /** A Plex {@code PUT} with no body, such as saving a part's chosen streams. */
+  static void put(String address, String token) throws Exception {
+    HttpURLConnection connection = (HttpURLConnection) URI.create(address).toURL().openConnection();
+    connection.setConnectTimeout(8000);
+    connection.setReadTimeout(15000);
+    connection.setInstanceFollowRedirects(false);
+    connection.setRequestMethod("PUT");
+    if (!token.isBlank()) connection.setRequestProperty("X-Plex-Token", token);
+    connection.setRequestProperty("Accept", "application/xml");
+    try {
+      int status = connection.getResponseCode();
+      if (status < 200 || status >= 300)
+        throw new IllegalStateException("Server returned HTTP " + status);
+    } finally {
+      connection.disconnect();
+    }
+  }
+
   static JSONArray list(byte[] xml) throws Exception {
     return list(xml, 2);
   }
@@ -249,7 +267,8 @@ final class PlexCatalog {
     XmlPullParser parser = parser(xml);
     JSONArray result = new JSONArray();
     JSONObject current = null;
-    int itemDepth = -1;
+    int itemDepth = -1, partDepth = -1;
+    boolean isFirstPart = false;
     String hub = "";
     StringBuilder cast = new StringBuilder();
     for (int event = parser.getEventType();
@@ -311,12 +330,36 @@ final class PlexCatalog {
                       .put("end", number(attribute(parser, "endTimeOffset")))
                       .put("isFinal", "1".equals(attribute(parser, "final"))));
         else if (current != null && name.equals("Part") && current.optString("part").isEmpty()) {
+          isFirstPart = true;
+          partDepth = parser.getDepth();
           current.put("part", attribute(parser, "key"));
           // indexes="sd" means a BIF of seek thumbnails at /library/parts/<id>/indexes/sd.
           current
               .getJSONObject("facts")
               .put("partId", attribute(parser, "id"))
-              .put("indexes", attribute(parser, "indexes"));
+              .put("indexes", attribute(parser, "indexes"))
+              .put("partContainer", attribute(parser, "container"))
+              .put("streams", new JSONArray());
+        } else if (current != null
+            && isFirstPart
+            && name.equals("Stream")
+            && parser.getDepth() == partDepth + 1)
+          current.getJSONObject("facts").getJSONArray("streams").put(stream(parser).json());
+        else if (current != null
+            && name.equals("Chapter")
+            && parser.getDepth() == itemDepth + 1) {
+          JSONObject facts = current.getJSONObject("facts");
+          if (!facts.has("chapters")) facts.put("chapters", new JSONArray());
+          facts
+              .getJSONArray("chapters")
+              .put(
+                  new Chapters.Chapter(
+                          attribute(parser, "tag"),
+                          (int) number(attribute(parser, "index")),
+                          number(attribute(parser, "startTimeOffset")),
+                          number(attribute(parser, "endTimeOffset")),
+                          attribute(parser, "thumb"))
+                      .json());
         } else if (current != null
             && java.util.Set.of("Genre", "Country").contains(name)
             && parser.getDepth() == itemDepth + 1)
@@ -329,7 +372,10 @@ final class PlexCatalog {
           if (!facts.has("videoResolution"))
             facts
                 .put("videoResolution", attribute(parser, "videoResolution"))
-                .put("audioChannels", attribute(parser, "audioChannels"));
+                .put("audioChannels", attribute(parser, "audioChannels"))
+                .put("container", attribute(parser, "container"))
+                .put("videoCodec", attribute(parser, "videoCodec"))
+                .put("audioCodec", attribute(parser, "audioCodec"));
         }
         else if (current != null
             && java.util.Set.of("Role", "Director", "Writer", "Producer").contains(name)) {
@@ -347,6 +393,11 @@ final class PlexCatalog {
           if (!role.isEmpty()) cast.append(" — ").append(role);
         }
       } else if (event == XmlPullParser.END_TAG
+          && isFirstPart
+          && parser.getName().equals("Part")
+          && parser.getDepth() == partDepth) {
+        isFirstPart = false;
+      } else if (event == XmlPullParser.END_TAG
           && current != null
           && parser.getDepth() == itemDepth) {
         current.put("cast", cast.toString());
@@ -355,6 +406,32 @@ final class PlexCatalog {
       }
     }
     return result;
+  }
+
+  /** One {@code <Stream>} of a part: streamType 1 video, 2 audio, 3 subtitle. */
+  private static PlexTracks.Stream stream(XmlPullParser parser) {
+    double frameRate;
+    try {
+      frameRate = Double.parseDouble(attribute(parser, "frameRate"));
+    } catch (NumberFormatException e) {
+      frameRate = 0;
+    }
+    String title = attribute(parser, "title");
+    if (title.isEmpty()) title = attribute(parser, "displayTitle");
+    return new PlexTracks.Stream(
+        number(attribute(parser, "id")),
+        (int) number(attribute(parser, "streamType")),
+        (int) number(attribute(parser, "index")),
+        attribute(parser, "languageCode").isEmpty()
+            ? attribute(parser, "languageTag")
+            : attribute(parser, "languageCode"),
+        title,
+        attribute(parser, "codec"),
+        "1".equals(attribute(parser, "selected")),
+        "1".equals(attribute(parser, "default")),
+        "1".equals(attribute(parser, "forced")),
+        attribute(parser, "key"),
+        frameRate);
   }
 
   private static int seasonNumber(String value) {

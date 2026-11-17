@@ -39,7 +39,7 @@ for density in (240,320):
     s.click('Rewind on resume · Off');key(20);key(23);s.contains('Rewind on resume · 1 second')
     s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Settings');s.click('Rewind on resume · 1 second');assert selected()==['1 second']
     key(19);key(23);s.contains('Rewind on resume · Off')
-    s.post('_tracks');s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play');time.sleep(2);key(127)
+    s.post('_tracks');s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play');s.answer_resume('Resume from 0:04');time.sleep(2);key(127)
     box=open_gear();anchored(box);assert focused().get('content-desc')=='Audio';time.sleep(4);s.shot('panel-playback-'+str(density));s.back();gear_focus()
     box=open_gear();s.click('Playback speed');anchored(box);assert selected()==['Normal · 1×'];s.click('1.5×');gear_focus()
     box=open_gear();s.click('Playback speed');assert selected()==['1.5×'];s.shot('panel-speed-'+str(density));s.click('Normal · 1×')
@@ -50,7 +50,7 @@ for density in (240,320):
     row=next(n for n in s.screen().iter('node') if 'Signs and songs' in n.get('content-desc',''));s.click(row.get('content-desc'))
     open_gear();s.click('Subtitles');assert len(selected())==1 and 'Signs and songs' in selected()[0],selected();s.shot('panel-subtitles-'+str(density));s.click('Off')
     open_gear();s.click('Subtitles');assert selected()==['Off'];s.back();gear_focus();s.back();s.contains('Watch with Ada')
-s.post('_unnamed_tracks');s.click('Play');time.sleep(2);key(127)
+s.post('_unnamed_tracks');s.click('Play');s.answer_resume('Resume from 0:04');time.sleep(2);key(127)
 open_gear();s.click('Audio')
 choices=[n.get('content-desc') for n in s.screen().iter('node') if ' · Track ' in n.get('content-desc','')]
 assert len(choices)==2 and choices[0]!=choices[1],choices

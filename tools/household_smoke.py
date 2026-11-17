@@ -68,7 +68,7 @@ s.back();wait_text('Your watching queues')
 # 3. A single title outside a queue keeps the profile the viewer chose: Grace's token.
 mark=len(get('/_requests'))
 s.click('Series');s.open_library('Series');s.contains('Orbit Nine');s.click('Orbit Nine');s.click('Season 1')
-s.click('Orbit Nine, S1 · E9 · The signal');s.contains('Watch with Grace');s.click('Play')
+s.click('Orbit Nine, S1 · E9 · The signal');s.contains('Watch with Grace');s.click('Play');s.answer_resume('Resume from 0:04')
 playing('library playback')
 media=[r for r in requests_after(mark) if r['path'] in ('/library/metadata/102','/video/sample.mp4')]
 assert media and all(r['profile']=='grace' for r in media),('A library title plays as the chosen profile',media)

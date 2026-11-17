@@ -100,6 +100,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private boolean advancing;
   private final Set<TvPanel> panels = new HashSet<>();
   private final RewindOnResume rewind = new RewindOnResume();
+  /** The playing part's Plex streams and the choice made from them, or null. */
+  private PlaybackTracks playbackTracks;
+  /** Each profile's plex.tv language settings, read once and kept in memory. */
+  private final Map<String, PlexTracks.Languages> accountLanguages =
+      new java.util.concurrent.ConcurrentHashMap<>();
   /** The catalog entry of the queue being played, saved with the profile's resume snapshot. */
   JSONObject nativeQueue;
   JSONArray queuePeople = new JSONArray();
@@ -1507,32 +1512,45 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                 PlexCatalog.list(
                     PlexCatalog.get(
                         PlexCatalog.url(
-                            origin, "/library/metadata/" + entry.key() + "?includeMarkers=1"),
+                            origin, "/library/metadata/" + entry.key() + "?includeMarkers=1&includeChapters=1"),
                         secret,
                         16 * 1024 * 1024));
             PlexCatalog.Entry detail = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
             if (detail.part().isEmpty()) throw new IllegalStateException();
+            // The chosen profile plays a single title, so its own language settings apply.
+            PlaybackTracks tracks = PlaybackTracks.forEntry(detail, this::chosenLanguages);
             byte[] artwork = nowPlayingArtwork(origin, secret, detail);
             String artworkUri = isQueueHome ? queueThumbUri(detail) : "";
             runOnUiThread(
                 () -> {
-                  if (request == generation) {
-                    nativePlan = null;
-                    playingEntry = detail;
-                    playingArtwork = artwork;
-                    playingArtworkUri = artworkUri;
-                    playingOrigin = origin;
-                    playingToken = secret;
-                    sectionFloor = 0;
-                    sectionEnd = -1;
-                    advancing = false;
-                    startPlayer(
-                        PlexCatalog.url(origin, detail.part()),
-                        secret,
-                        detail.title(),
-                        detail.cast());
-                    player.seekTo(detail.resume());
-                  }
+                  if (request != generation) return;
+                  ResumePrompt.ask(
+                      this,
+                      panel(),
+                      detail.primary(),
+                      detail.resume(),
+                      0,
+                      detail.duration(),
+                      rewindSeconds(),
+                      start -> {
+                        if (request != generation) return;
+                        nativePlan = null;
+                        playingEntry = detail;
+                        playingArtwork = artwork;
+                        playingArtworkUri = artworkUri;
+                        playingOrigin = origin;
+                        playingToken = secret;
+                        playbackTracks = tracks;
+                        sectionFloor = 0;
+                        sectionEnd = -1;
+                        advancing = false;
+                        startPlayer(
+                            PlexCatalog.url(origin, detail.part()),
+                            secret,
+                            detail.title(),
+                            detail.cast());
+                        player.seekTo(start);
+                      });
                 });
           } catch (Exception e) {
             runOnUiThread(
@@ -1637,6 +1655,15 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout actions = ui.row();
     overlay.addView(actions);
     ui.action(actions, "Cast", R.drawable.lucide_users, () -> showCast(playingEntry), false);
+    if (!playingChapters().isEmpty()) {
+      ui.action(
+          actions,
+          "Chapters",
+          R.drawable.lucide_bookmark,
+          () -> chapterOptions(actions.findViewWithTag("player-chapters")),
+          false);
+      actions.getChildAt(actions.getChildCount() - 1).setTag("player-chapters");
+    }
     if (nativePlan != null)
       ui.action(
           actions,
@@ -1680,6 +1707,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     playerView.getOverlayFrameLayout().addView(ass.overlay, new FrameLayout.LayoutParams(-1, -1));
     player =
         new ExoPlayer.Builder(this, ass.renderers(this))
+            .setSeekBackIncrementMs(SkipIntervals.backMs(PlaybackSettings.back(prefs())))
+            .setSeekForwardIncrementMs(
+                SkipIntervals.forwardMs(
+                    playingEntry == null ? -1 : playingEntry.duration(),
+                    PlaybackSettings.forwardShort(prefs()),
+                    PlaybackSettings.forwardLong(prefs())))
             .setLoadControl(
                 new androidx.media3.exoplayer.DefaultLoadControl.Builder()
                     .setTargetBufferBytes(32 * 1024 * 1024)
@@ -1691,6 +1724,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);
     playerView.setShowSubtitleButton(true);
+    applyCaptionStyle();
     installPlaybackMenus();
     roundPlayerControls(playerView);
     scalePlayerControls(playerView);
@@ -1706,6 +1740,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             });
     player.addListener(
         new Player.Listener() {
+          @Override
+          public void onTracksChanged(androidx.media3.common.Tracks tracks) {
+            if (player == null) return;
+            if (playbackTracks != null) playbackTracks.apply(player, tracks);
+            matchFrameRate();
+          }
+
           @Override
           public void onVideoSizeChanged(VideoSize size) {
             ass.videoSize(Math.round(size.width * size.pixelWidthHeightRatio), size.height);
@@ -1755,7 +1796,13 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             .setUri(url)
             .setMediaId(playingEntry == null ? "video" : playingEntry.key())
             .setMediaMetadata(nowPlayingMetadata(title))
+            .setSubtitleConfigurations(
+                playbackTracks == null
+                    ? List.of()
+                    : playbackTracks.externalSubtitles(
+                        playingOrigin.isEmpty() ? server() : playingOrigin))
             .build());
+    if (playbackTracks != null) playbackTracks.prepare(player);
     player.prepare();
     player.play();
     playerView.requestFocus();
@@ -2163,6 +2210,17 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     JSONObject grant = queueGrant(nativePlan, itemServer);
     boolean isQueueHome = itemServer.equals(nativePlan.optString("homeServerId"));
     JSONObject boundProfile = profile;
+    // When Plex selects no streams, the queue profile's own plex.tv language settings decide. The
+    // QueuePilot server sends them with the plan, since this TV holds no plex.tv token for another
+    // profile. Without them, a queue that plays as the chosen profile uses the chosen profile's
+    // settings; another profile's queue keeps Plex's selection, never the chosen profile's.
+    JSONObject planLanguages = nativePlan.optJSONObject("languages");
+    boolean isChosenProfile =
+        grant == null || activeId.equals(nativePlan.optString("profileUuid"));
+    java.util.concurrent.Callable<PlexTracks.Languages> queueLanguages =
+        planLanguages != null
+            ? () -> PlexTracks.Languages.fromUser(planLanguages)
+            : isChosenProfile ? this::chosenLanguages : null;
     network.execute(
         () -> {
           try {
@@ -2215,13 +2273,16 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                                     origin,
                                     "/library/metadata/"
                                         + item.getString("ratingKey")
-                                        + "?includeMarkers=1"),
+                                        + "?includeMarkers=1&includeChapters=1"),
                                 secret,
                                 16 * 1024 * 1024))
                         .getJSONObject(0));
             if (entry.part().isEmpty())
               throw new IllegalStateException("This item has no direct playback source");
             String mediaOrigin = origin, mediaToken = secret;
+            // Plex marks the queue profile's own choices, since the queue's grant asked. The
+            // chosen profile's language settings are never applied to another profile's queue.
+            PlaybackTracks tracks = PlaybackTracks.forEntry(entry, queueLanguages);
             byte[] artwork = nowPlayingArtwork(origin, secret, entry);
             String artworkUri = isQueueHome ? queueThumbUri(entry) : "";
             runOnUiThread(
@@ -2232,6 +2293,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   playingArtworkUri = artworkUri;
                   playingOrigin = mediaOrigin;
                   playingToken = mediaToken;
+                  playbackTracks = tracks;
                   sectionFloor = item.optLong("sectionStartMs", 0);
                   sectionEnd =
                       item.has("sectionEndMs") && !item.isNull("sectionEndMs")
@@ -3283,6 +3345,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout.LayoutParams sizeGap = new LinearLayout.LayoutParams(-2, -2);
     sizeGap.leftMargin = dp(12);
     preferences.addView(sizeButton, sizeGap);
+    TextView playbackButton =
+        ui.button("Playback", R.drawable.lucide_circle_play, () -> playbackSettings().show(), false);
+    playbackButton.setTag("playback-settings");
+    LinearLayout.LayoutParams playbackGap = new LinearLayout.LayoutParams(-2, -2);
+    playbackGap.leftMargin = dp(12);
+    preferences.addView(playbackButton, playbackGap);
     content.addView(preferences);
     focusFirst(row.getChildAt(0));
   }
@@ -3949,18 +4017,25 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void playbackOptions(View anchor) {
     if (player == null) return;
+    List<String> items =
+        new ArrayList<>(List.of("Audio", "Subtitles", "Playback speed", "Playback settings"));
+    if (!playingChapters().isEmpty()) items.add(3, "Chapters");
     playbackPanel(anchor)
         .setTitle("Playback")
         .setItems(
-            new String[] {"Audio", "Subtitles", "Playback speed"},
+            items.toArray(new String[0]),
             (d, index) -> {
-              if (index == 2) speedOptions(anchor);
-              else
-                trackOptions(
-                    anchor,
-                    index == 0
-                        ? androidx.media3.common.C.TRACK_TYPE_AUDIO
-                        : androidx.media3.common.C.TRACK_TYPE_TEXT);
+              switch (items.get(index)) {
+                case "Playback speed" -> speedOptions(anchor);
+                case "Chapters" -> chapterOptions(anchor);
+                case "Playback settings" -> playbackSettings().show();
+                default ->
+                    trackOptions(
+                        anchor,
+                        index == 0
+                            ? androidx.media3.common.C.TRACK_TYPE_AUDIO
+                            : androidx.media3.common.C.TRACK_TYPE_TEXT);
+              }
             })
         .setNegativeButton("Close", null)
         .create()
@@ -3996,6 +4071,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     List<androidx.media3.common.TrackSelectionOverride> overrides = new ArrayList<>();
     labels.add(text ? "Off" : "Automatic");
     overrides.add(null);
+    List<androidx.media3.common.Tracks.Group> rowGroups = new ArrayList<>();
+    List<Integer> rowIndexes = new ArrayList<>();
+    rowGroups.add(null);
+    rowIndexes.add(-1);
     int selected = 0;
     boolean disabled = target.getTrackSelectionParameters().disabledTrackTypes.contains(type);
     boolean automatic =
@@ -4014,6 +4093,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         labels.add(name);
         overrides.add(
             new androidx.media3.common.TrackSelectionOverride(group.getMediaTrackGroup(), i));
+        rowGroups.add(group);
+        rowIndexes.add(i);
         if (!disabled && !automatic && group.isTrackSelected(i)) selected = labels.size() - 1;
       }
     }
@@ -4024,6 +4105,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       String label = labels.get(i);
       if (counts.get(label) > 1) labels.set(i, label + " · Track " + i);
     }
+    int selectedRow = selected;
     TvPanel.Builder builder =
         playbackPanel(anchor)
             .setTitle(text ? "Subtitles" : "Audio")
@@ -4040,12 +4122,93 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                           .setTrackTypeDisabled(type, text && i == 0);
                   if (i > 0) parameters.setOverrideForType(overrides.get(i));
                   target.setTrackSelectionParameters(parameters.build());
+                  // Confirming the row that is already playing changes nothing to save.
+                  if (i != selectedRow) saveTrackChoice(type, rowGroups.get(i), rowIndexes.get(i));
                 })
             .setNegativeButton("Back", (d, i) -> playbackOptions(anchor));
     if (labels.size() == 1)
       builder.setMessage(
           text ? "No subtitle tracks in this video." : "No selectable audio tracks in this video.");
     builder.create().show();
+  }
+
+  // Playback features that live in their own classes; these are only their call sites.
+
+  private PlaybackSettings playbackSettings() {
+    return new PlaybackSettings(this, prefs(), this::panel, this::matchFrameRate, () -> {});
+  }
+
+  private List<Chapters.Chapter> playingChapters() {
+    return playingEntry == null
+        ? List.of()
+        : Chapters.fromJson(playingEntry.facts().optJSONArray("chapters"));
+  }
+
+  private void chapterOptions(View anchor) {
+    List<Chapters.Chapter> chapters = playingChapters();
+    if (player == null || chapters.isEmpty()) return;
+    ExoPlayer target = player;
+    String origin = playingOrigin, secret = playingToken;
+    long floor = sectionFloor, end = sectionEnd;
+    ChapterMenu.show(
+        this,
+        playbackPanel(anchor),
+        chapters,
+        target.getCurrentPosition(),
+        network,
+        thumb -> artwork(origin, secret, thumb, 240),
+        start -> {
+          if (player == target)
+            target.seekTo(Chapters.seekTarget(start, floor, end));
+        });
+  }
+
+  private void matchFrameRate() {
+    if (player == null) return;
+    DisplayModeSwitch.apply(
+        getWindow(),
+        PlaybackSettings.isFrameRateMatched(prefs()),
+        playbackTracks == null ? 0 : playbackTracks.frameRate(),
+        player.getCurrentTracks());
+  }
+
+  /** Text subtitles follow Android's caption settings; ASS keeps its own styles. */
+  private void applyCaptionStyle() {
+    androidx.media3.ui.SubtitleView subtitles =
+        playerView == null ? null : playerView.getSubtitleView();
+    if (subtitles == null) return;
+    subtitles.setUserDefaultStyle();
+    subtitles.setUserDefaultTextSize();
+  }
+
+  /** The chosen profile's plex.tv language settings, or null. Call off the main thread. */
+  private PlexTracks.Languages chosenLanguages() throws Exception {
+    String proof = profileProof();
+    PlexTracks.Languages known = accountLanguages.get(proof);
+    if (known != null) return known;
+    PlexTracks.Languages read = PlexTracks.Languages.fromUser(auth.user(proof));
+    accountLanguages.put(proof, read);
+    return read;
+  }
+
+  /** Saves a track the viewer chose to Plex, for the profile that is playing the item. */
+  private void saveTrackChoice(int type, androidx.media3.common.Tracks.Group group, int index) {
+    PlaybackTracks known = playbackTracks;
+    if (player == null || known == null || !known.hasStreams() || playingEntry == null) return;
+    boolean isText = type == androidx.media3.common.C.TRACK_TYPE_TEXT;
+    if (group == null && !isText) return; // Automatic audio is not a choice to save.
+    long streamId =
+        group == null ? 0 : known.streamId(player.getCurrentTracks(), type, group, index);
+    String origin = playingOrigin, secret = playingToken;
+    String partId = playingEntry.facts().optString("partId");
+    progressNetwork.execute(
+        () ->
+            PlaybackTracks.save(
+                origin,
+                secret,
+                partId,
+                isText ? PlexTracks.SUBTITLE : PlexTracks.AUDIO,
+                streamId));
   }
 
   private void reportPlayback(String state) {
@@ -4575,6 +4738,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void releasePlayer() {
     getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    DisplayModeSwitch.clear(getWindow());
     skipButton = null;
     seekPreview = null;
     seekIndex = null;
@@ -4597,6 +4761,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   @Override
   protected void onResume() {
     super.onResume();
+    // The caption style may have been changed in Android's settings meanwhile.
+    applyCaptionStyle();
     // Coming back to a screen that still shows saved queues asks QueuePilot again at once.
     queueLoader.retryQueuesNow("resumed");
   }

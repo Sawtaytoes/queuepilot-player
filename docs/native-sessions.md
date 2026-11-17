@@ -17,7 +17,10 @@ have to match the queue. The server plays the queue as the profile the queue nam
 (`requires_profile`, else the routing binding, else the owner). The plan preserves full
 engine-selected batches, source server IDs, resume offsets and section windows. It returns an
 expiring session capability, ordered media IDs, and `grants`: the queue profile's
-server-scoped Plex token and verified address for each server the items live on. The client
+server-scoped Plex token and verified address for each server the items live on. An optional
+`languages` object carries the queue profile's plex.tv language settings (the `profile` fields
+`defaultAudioLanguage`, `autoSelectAudio`, `defaultSubtitleLanguage`, and
+`autoSelectSubtitle`), which the player applies when Plex selects no streams. The client
 streams each item directly with that grant, so a queue plays as its own profile whichever
 profile the TV has chosen; the chosen profile is used only outside queues. Cloud tokens never
 go to a media server, and the grants are held in memory only.

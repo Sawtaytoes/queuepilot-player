@@ -87,6 +87,7 @@ final class TvPanel extends Dialog {
             },
             i == b.selected ? TvTheme.ACCENT_SURFACE : TvUi.PANEL);
         row.setContentDescription(b.items[i]);
+        if (b.decorator != null) b.decorator.accept(i, row);
         body.addView(row, new LinearLayout.LayoutParams(-1, -2));
         ui.gap(body, 6);
       }
@@ -205,6 +206,7 @@ final class TvPanel extends Dialog {
     private String[] items;
     private int selected = -1;
     private int[] icons;
+    private java.util.function.BiConsumer<Integer, LinearLayout> decorator;
     private DialogInterface.OnClickListener itemClick;
     private Runnable opened, closed;
     private java.util.function.Consumer<TvPanel> created, dismissed;
@@ -253,6 +255,12 @@ final class TvPanel extends Dialog {
     /** A Lucide icon before each item's label, in the label's color; 0 for none. */
     Builder setItemIcons(int[] values) {
       icons = values;
+      return this;
+    }
+
+    /** Adds views to each item's row, such as a picture before its label. */
+    Builder setItemDecorator(java.util.function.BiConsumer<Integer, LinearLayout> value) {
+      decorator = value;
       return this;
     }
 

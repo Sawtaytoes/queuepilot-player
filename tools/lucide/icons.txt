@@ -54,3 +54,7 @@ users
 x
 lock
 delete
+bookmark
+fast-forward
+rewind
+monitor-play

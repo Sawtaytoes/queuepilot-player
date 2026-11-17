@@ -39,7 +39,7 @@ s.shot('details-facts-show')
 
 # Player controls are icon buttons, each with a spoken name.
 BIF='/library/parts/1102/indexes/sd';fetched=len(requests(BIF))
-s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play')
+s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play');s.answer_resume('Resume from 0:04')
 time.sleep(2);s.adb('shell','input','keyevent','127')
 CONTROLS=('exo_prev','exo_rew_with_amount','exo_play_pause','exo_ffwd_with_amount','exo_next','exo_subtitle','exo_settings')
 def controls():

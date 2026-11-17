@@ -157,6 +157,9 @@ def launch():
     out=adb('shell','am','start','-W','-n',PACKAGE+'/dev.queuepilot.player.MainActivity','--ez','fixture','true').decode()
     print('Launch:',' '.join(re.findall(r'(?:LaunchState|TotalTime|WaitTime): \S+',out)),flush=True);time.sleep(1)
 def back():adb('shell','input','keyevent','4');time.sleep(.3)
+def answer_resume(label):
+    """A title with a saved position asks before it plays; wait for the question, then answer."""
+    contains(label);click(label)
 def enter_pin(value):
     assert not any(n.get('class')=='android.widget.EditText' for n in screen().iter('node'))
     shot('profile-pin')
@@ -186,7 +189,7 @@ def main():
     click('Morgan');enter_pin('1111');contains("Plex couldn't unlock that profile");click('Choose profile');click('Ada');contains('What are we watching?');contains('Demo Cinema');shot('signed-in-home')
     click('Series');open_library('Series');contains('Orbit Nine');shot('library')
     click('Orbit Nine');contains('Season 1');click('Season 1');contains('S1 · E9 · The signal');click('Orbit Nine, S1 · E9 · The signal');contains('Watch with Ada');contains('Orbit Nine');shot('title')
-    click('Play');time.sleep(3);adb('shell','input','keyevent','127');adb('shell','input','keyevent','19');contains('Decoded video: 1280 × 720');click('Cast');contains('Nadia Lane');contains('Omar Reed');cast_photos('Nadia Lane','Omar Reed');shot('cast');click('Close');back();contains('Watch with Ada')
+    click('Play');answer_resume('Resume from 0:04');time.sleep(3);adb('shell','input','keyevent','127');adb('shell','input','keyevent','19');contains('Decoded video: 1280 × 720');click('Cast');contains('Nadia Lane');contains('Omar Reed');cast_photos('Nadia Lane','Omar Reed');shot('cast');click('Close');back();contains('Watch with Ada')
     back();contains('The signal');back();contains('Season 1');back();contains('Orbit Nine')
     click('Home');click('Switch profile, Ada');click('Grace');contains('What are we watching?');contains('Demo Cinema');click('Series');open_library('Series');contains('Orbit Nine')
     post('_cloud_offline');post('_offline');click('Home');click('Switch profile, Grace');click('Ada');contains('What are we watching?');click('Series');contains('Saved listing');open_library('Series');contains('Saved listing');contains('Orbit Nine');shot('cached-library')

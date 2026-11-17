@@ -162,7 +162,7 @@ final class AssRenderer extends BaseRenderer {
     if (restorePending && format != null && seekReader.index.ready()) {
       restorePending = false;
       try {
-        int track = Integer.parseInt(format.id);
+        int track = PlexTracks.containerTrackNumber(format.id);
         Handler recoveryWorker = worker;
         long streamOffsetMs = streamOffsetUs / 1000;
         seekReader.restore(

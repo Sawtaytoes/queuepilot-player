@@ -39,7 +39,7 @@ s.post('_online');s.post('_markers')
 # Library playback: intro 6-14 s, mid-credits 18-21 s, final credits 25-30 s; resume at 4 s.
 s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Home')
 if s.has_desc('Switch profile, Morgan'):s.click('Switch profile, Morgan');s.click('Ada');s.contains('What are we watching?')
-s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play')
+s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.click('Play');s.answer_resume('Resume from 0:04')
 skip('Skip Intro','marker-skip-intro')
 at=library_paused_at();assert 14000<=at<18000,at;s.adb('shell','input','keyevent','126')
 skip('Skip Credits','marker-skip-credits')

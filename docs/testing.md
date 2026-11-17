@@ -56,7 +56,7 @@ blocks the browser remote. It then installs the checkout's debug APK, starts
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
 `rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `household_smoke.py`,
-`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
+`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `playback_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
@@ -215,6 +215,28 @@ list for the launcher has these activities: `.MainActivity`, `.appsview.AppsView
 `.settings.OpenSourceActivity`, with receivers and a provider. The recommendations package includes
 `.promos.config.ConfigurationProvider` and `.promos.server.LocaleChangeReceiver`. Which component
 shows the promotions is not yet known.
+
+`playback_smoke.py` follows the library check, while the fixture QueuePilot is still connected,
+and before `layout_smoke.py` clears the app's data. The fixture's episode 102 can carry Plex
+stream metadata for `tracks.mkv` (`POST /_plex_tracks/<mode>`): `selected` marks Commentary and
+Signs and songs, `external` marks a subtitle file served at `/library/streams/9005`, and
+`account` marks nothing, so the account's plex.tv `profile` (English audio, English subtitles
+with foreign audio) decides. `PUT /library/parts/1102` records each save (`GET /_stream_saves`)
+and changes the selection, as Plex does. In those modes the episode has three chapters with
+chapter images. The check covers: Settings → Playback and its defaults, a stored Skip back of
+15 seconds shown on the player's rewind control beside a forward skip of 10 for the 30-second
+episode, and the caption settings link; the resume question with Resume focused, and Start from
+the beginning starting at 0; Plex's selected audio and subtitles, a changed audio track and
+subtitles Off saved for Ada with `allParts=1`, and both coming back from Plex on the next play;
+the frame-rate request in the `QueuePilotFrameRate` log, and its clearing when Match frame rate
+is turned off from the player's options; chapters opening below their top-bar control with every
+chapter image shown, and a chapter seek; the sidecar subtitle loaded with Ada's token; the account
+languages choosing the full English subtitles for Japanese audio; confirming the track that is
+already playing saving nothing; queues using the plan's `languages` when Plex selects nothing
+(Ada's queue shows the full English subtitles, Grace's only the forced signs, which is Grace's own
+setting); and a queue that plays as Grace saving its choice with Grace's grant while Ada is
+chosen. Every check that presses Play on
+the episode now answers the resume question.
 
 ## Lucide icons
 
