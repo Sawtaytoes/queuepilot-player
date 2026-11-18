@@ -55,7 +55,7 @@ def png_row(data,y):
 def set_size(percent):
     s.click('Settings');wait(lambda:[n for n in nodes() if n.get('text','').startswith('Display size · ')],'Display size')
     current=next(n.get('text') for n in nodes() if n.get('text','').startswith('Display size · '))
-    s.click(current);s.contains('Make everything smaller');s.click(f'{percent}%')
+    s.click(current);s.contains('Make everything smaller');s.choose_display_size(percent)
     wait(lambda:by_text(f'Display size · {percent}%'),f'Display size · {percent}%')
 
 def assert_text_fits():

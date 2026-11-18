@@ -37,7 +37,7 @@ def set_size(percent):
     s.click('Settings');wait(lambda:any(t.startswith('Display size · ') for t in texts()),'Display size')
     current=next(t for t in texts() if t.startswith('Display size · '))
     if current!=f'Display size · {percent}%':
-        s.click(current);s.contains('Make everything smaller');s.click(f'{percent}%')
+        s.click(current);s.contains('Make everything smaller');s.choose_display_size(percent)
         wait_text(f'Display size · {percent}%')
 def scroll_to(prefix):
     """Moves D-pad focus down until the card whose spoken name starts with prefix has it; the

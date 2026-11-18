@@ -93,6 +93,28 @@ def return_from_launcher(root):
         raise AssertionError('The app was recreated after the TV launcher came to the front; the original had stopped.')
 def has_desc(value):return any(n.get('content-desc')==value for n in screen().iter('node'))
 def text():return '\n'.join(n.get('text','') for n in screen().iter('node'))
+def choose_display_size(percent):
+    """Chooses percent in the open Display size panel with the remote, as a person does: Up or
+    Down from the focused row until percent has focus, then OK. Taps were ignored in some runs,
+    three times in a row in one (docs/testing.md); a TV has no touch screen, and remote choices
+    landed in tools/panel_input_probe.py. Fails if focus cannot reach percent or the panel stays
+    open after OK."""
+    target=f'{percent}%'
+    for _ in range(30):
+        found=list(screen().iter('node'))
+        rows=[n.get('content-desc') for n in found if re.fullmatch(r'\d+%|Auto · \d+%',n.get('content-desc') or '')]
+        now=next((n for n in found if n.get('focused')=='true'),None)
+        where=(now.get('content-desc') or now.get('text') or '') if now is not None else ''
+        if where==target:
+            adb('shell','input','keyevent','23');break
+        if where in rows and target in rows:code='20' if rows.index(target)>rows.index(where) else '19'
+        else:code='19' if where=='Cancel' else '20' # Cancel is below the sizes; the rest is above
+        adb('shell','input','keyevent',code);time.sleep(.3)
+    else:raise AssertionError(f'Remote focus did not reach {target} in the Display size panel; it is on {where!r}\n'+text())
+    for _ in range(10):
+        if 'Make everything smaller' not in text():return
+        time.sleep(.5)
+    raise AssertionError(f'The Display size panel stayed open after OK on {target}\n'+text())
 def contains(value):
     for i in range(10):
         if value in text():return

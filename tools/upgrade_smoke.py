@@ -95,7 +95,7 @@ def main():
     current = display_size()
     s.click(current)
     wait_for('Make everything smaller')
-    s.click(f'{SIZE}%')
+    s.choose_display_size(SIZE)
     wait_for(f'Display size · {SIZE}%')
     state = s.app_file('shared_prefs/state.xml')
     secrets = s.app_file('shared_prefs/secrets.xml')

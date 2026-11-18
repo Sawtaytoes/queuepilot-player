@@ -298,6 +298,51 @@ StrictMode is on only for a debuggable build on the emulator launched with `--ez
 (`DebugChecks.java`): the preview APKs that TVs run are debuggable too. The probe signs in from a
 clean app, so run it through `queuepilot-test run`, which restores the person's session.
 
+### A lost tap in the Display size panel
+
+On 2026-11-17, three suite runs on different branches failed the same way: a check tapped 125%
+in the Display size panel, and the panel stayed open with the old size still checked. Two were in
+`display_smoke.py` and one in `queue_history_smoke.py`. The logs show that the tap was ignored;
+they do not show why. A first fix tapped again while the panel stayed open, three times at most.
+In its own suite run, `queue_history_smoke.py` then had all three taps on 125% ignored, over
+several seconds, while the screen listed 125% and the Cancel button below it. So in some state
+of the app a tap on that row does nothing, and a retry does not help. Why is still not known.
+
+People use the remote, so `tools/panel_input_probe.py` asked whether a remote choice can be lost
+the same way. On the lab emulator on 2026-11-17, from Settings, it focused Display size with the
+D-pad, pressed OK, moved Down five times from the checked 100% to 125%, and pressed OK:
+
+- Focus was on the checked 100% at both readings, the first taken as soon as the screen could be
+  read after OK and the second after a further 1.5-second pause, in 10 of 10 trials. Reading the
+  screen takes time that is not measured, and two readings cannot rule out a brief focus change
+  between them.
+- With a person-like pace (OK, a one-second pause, then each key as its own `input` command
+  with a 0.25-second pause after it, plus each command's unmeasured start-up time), 10 of 10
+  choices landed.
+- With the keys sent as soon as a second `input` command starts, 10 of 10 landed.
+- With `--gaps`, the second `input` command, with the Downs and OK, was started 50, 100, 150,
+  200, or 300 ms after the one with OK: 40 of 40 landed, 8 at each delay. These are delays
+  between starting the two commands, not measured times between the keys reaching the app;
+  each command's start-up time varies.
+- Keys sent together with OK were lost or reached the Settings screen behind the panel:
+  10 of 10 when all the keys were in one `input` command, and 7 of 8 when both commands started
+  at once, where the Downs can even arrive before OK. That fits a new window taking key input a
+  moment after it opens.
+- Taps through the sequence the checks used then (tap the Display size row, wait until the
+  panel's text can be read, then tap 125%) landed in 10 of 10 trials, so the lost tap did not
+  happen in the probe.
+
+In these emulator runs, no remote choice was lost unless its keys were sent together with OK.
+That does not prove a fast remote press can never be lost, but no evidence points to a defect
+for the remote. The ignored taps may be an app defect for touch input; a TV has no touch screen,
+so the panel is unchanged. The checks that choose a size
+(`display_smoke.py`, `queue_history_smoke.py`, and `upgrade_smoke.py`) now do it as a person
+does, through `smoke.choose_display_size()`: Up or Down from the focused row until the size has
+focus, then OK. No check retries a choice. It reads the focused row after each key, and fails if focus cannot reach the
+size or the panel stays open after OK. The probe also tried to read, from the system's event
+log, when the panel's window took key input. It could not determine that time, so it is not
+known.
+
 ## Lucide icons
 
 The app's icons are Lucide icons converted to Android vector drawables. `tools/lucide/icons.txt`
