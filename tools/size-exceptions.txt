@@ -5,7 +5,7 @@
 # (2026-11-17); each split lowers its ceiling. Policy: docs/decisions/README.md.
 
 # Being split into one file per screen, area by area.
-android/app/src/main/java/dev/queuepilot/player/MainActivity.java 3750
+android/app/src/main/java/dev/queuepilot/player/MainActivity.java 3450
 # Plex parsing; to be split by kind of object after the title-screen work lands.
 android/app/src/main/java/dev/queuepilot/player/PlexCatalog.java 600
 # The test fixture server; to be split by route group.

@@ -28,7 +28,7 @@ final class WatchingScreen {
     String origin = host.prefs().getString("queue-origin", "");
     if (origin.isEmpty()) {
       host.status.setText("Connect your QueuePilot server to see your queues here.");
-      host.content.addView(host.ui.button("Connect QueuePilot", host::queueSetup, true));
+      host.content.addView(host.ui.button("Connect QueuePilot", host.settingsScreen::queueSetup, true));
       return;
     }
     Set<String> selected = new HashSet<>(host.prefs().getStringSet("queue-people", Set.of()));

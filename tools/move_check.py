@@ -150,8 +150,9 @@ class Check:
                     if side == 'head':
                         self.use(current, target, name, count, code[at + 1].line)
                     holder = self.holders[side].get(name) if target == SOURCE else None
-                    if holder and code[at].text == '.' and naming.is_member(code, at + 2) and code[at + 2].text == '.':
-                        target, at = holder, at + 2  # host.homeScreen.home() calls HomeScreen.home
+                    if holder and code[at].text == '.' and naming.is_member(code, at + 2):
+                        # host.homeScreen.home() calls HomeScreen.home; host.homeScreen::home names it
+                        target, at = holder, at + 2
                         continue
                     if code[at].text == '::':
                         out.append(('::', code[at].line))

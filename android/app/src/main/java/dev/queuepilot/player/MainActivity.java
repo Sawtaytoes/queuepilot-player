@@ -103,6 +103,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   final TitleScreen titleScreen = new TitleScreen(this);
   final CastPanel castPanel = new CastPanel(this);
+  final SettingsScreen settingsScreen = new SettingsScreen(this);
 
   /** What the screen parts in their own files ({@link TitleExtrasRow}, …) use of this activity. */
   final ScreenHost screenHost =
@@ -325,7 +326,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       case "welcome" -> signInScreen.welcome();
       case "signin" -> signInScreen.signIn();
       case "profiles" -> profilePicker.chooseProfile();
-      case "settings" -> settings();
+      case "settings" -> settingsScreen.settings();
       case "library" -> load(screen.path(), screen.title());
       case "details" -> titleScreen.details(screen.entry());
       case "demo" -> demoCatalog.demoSeason();
@@ -2180,99 +2181,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   final HistoryScreen historyScreen = new HistoryScreen(this);
 
-  void queueSetup() {
-    LinearLayout form = ui.column();
-    form.setPadding(dp(24), dp(8), dp(24), dp(8));
-    EditText input = new EditText(this);
-    input.setSingleLine();
-    input.setHint("https://queues.example.com");
-    input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-    input.setText(prefs().getString("queue-origin", ""));
-    form.addView(input, new LinearLayout.LayoutParams(-1, dp(54)));
-    TvPanel d =
-        panel()
-            .setTitle("Connect QueuePilot")
-            .setMessage("Enter the address you use to open QueuePilot.")
-            .setView(form)
-            .setPositiveButton("Connect", null)
-            .setNegativeButton("Cancel", null)
-            .create();
-    d.setOnShowListener(
-        v -> {
-          d.setPanelSize(dp(470), -2);
-          d.getButton(TvPanel.BUTTON_POSITIVE)
-              .setOnClickListener(
-                  b -> {
-                    try {
-                      String origin = PlexCatalog.base(input.getText().toString());
-                      prefs().edit().putString("queue-origin", origin).apply();
-                      d.dismiss();
-                      navigate(new Screen("queues"));
-                    } catch (Exception e) {
-                      input.setError("Enter a complete http:// or https:// address");
-                    }
-                  });
-        });
-    d.show();
-  }
-
-  private void settings() {
-    shell("Settings");
-    heading("QueuePilot TV", "Settings");
-    status.setText("Playback preview · " + versionName());
-    LinearLayout row = horizontal();
-    row.addView(
-        ui.card(
-            "Plex account",
-            R.drawable.lucide_circle_user_round,
-            account.optString("name", "Connect Plex"),
-            "Sign in on your phone using a TV code.",
-            "Sign in with Plex",
-            () -> navigate(new Screen("signin")),
-            270));
-    row.addView(
-        ui.card(
-            "QueuePilot",
-            R.drawable.lucide_list_video,
-            "Your queue server",
-            "Connect the server that manages your watching queues.",
-            "Connect QueuePilot",
-            this::queueSetup,
-            270));
-    row.addView(
-        ui.card(
-            "Plex Home",
-            R.drawable.lucide_users,
-            "Who's watching?",
-            "Choose a profile and its library access.",
-            "Switch profile",
-            () -> navigate(new Screen("profiles")),
-            270));
-    ui.gap(content, 22);
-    LinearLayout preferences = ui.row();
-    TextView rewindButton =
-        ui.button(rewindLabel(), R.drawable.lucide_rotate_ccw, this::rewindSetting, false);
-    rewindButton.setTag("rewind-setting");
-    preferences.addView(rewindButton);
-    TextView sizeButton =
-        ui.button(
-            "Display size · " + DisplaySize.label(prefs()),
-            R.drawable.lucide_scaling,
-            this::displaySizeSetting,
-            false);
-    LinearLayout.LayoutParams sizeGap = new LinearLayout.LayoutParams(-2, -2);
-    sizeGap.leftMargin = dp(12);
-    preferences.addView(sizeButton, sizeGap);
-    TextView playbackButton =
-        ui.button("Playback", R.drawable.lucide_circle_play, () -> playbackSettings().show(), false);
-    playbackButton.setTag("playback-settings");
-    LinearLayout.LayoutParams playbackGap = new LinearLayout.LayoutParams(-2, -2);
-    playbackGap.leftMargin = dp(12);
-    preferences.addView(playbackButton, playbackGap);
-    content.addView(preferences);
-    focusFirst(row.getChildAt(0));
-  }
-
   private LinearLayout seekPreview;
   private ImageView seekPreviewImage;
   private TextView seekPreviewTime;
@@ -2439,200 +2347,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     }
   }
 
-  /**
-   * Display size: Auto, computed from the screen and the viewing distance entered above it, or a
-   * manual size from 50% to 125%.
-   */
-  private void displaySizeSetting() {
-    float inches = prefs().getFloat(DisplaySize.SCREEN_KEY, DisplaySize.DEFAULT_SCREEN_INCHES);
-    float feet = prefs().getFloat(DisplaySize.DISTANCE_KEY, DisplaySize.DEFAULT_DISTANCE_FEET);
-    int stored =
-        DisplaySize.valid(prefs().getInt(DisplaySize.PREFERENCE_KEY, DisplaySize.DEFAULT_PERCENT));
-    String[] choices = new String[DisplaySize.CHOICES.length + 1];
-    choices[0] = DisplaySize.label(DisplaySize.AUTO, inches, feet);
-    for (int i = 0; i < DisplaySize.CHOICES.length; i++)
-      choices[i + 1] = DisplaySize.label(DisplaySize.CHOICES[i], inches, feet);
-    TvPanel[] holder = new TvPanel[1];
-    LinearLayout measures = ui.column();
-    TextView screen =
-        ui.button(
-            "Screen · " + DisplaySize.screenLabel(inches),
-            R.drawable.lucide_tv,
-            () -> {
-              holder[0].dismiss();
-              displayMeasureSetting(true);
-            },
-            false);
-    screen.setContentDescription("Screen size, " + DisplaySize.screenLabel(inches));
-    screen.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-    measures.addView(screen, new LinearLayout.LayoutParams(-1, -2));
-    ui.gap(measures, 8);
-    TextView distance =
-        ui.button(
-            "Distance · " + DisplaySize.distanceLabel(feet),
-            R.drawable.lucide_ruler,
-            () -> {
-              holder[0].dismiss();
-              displayMeasureSetting(false);
-            },
-            false);
-    distance.setContentDescription("Viewing distance, " + DisplaySize.distanceLabel(feet));
-    distance.setGravity(Gravity.CENTER_VERTICAL | Gravity.START);
-    measures.addView(distance, new LinearLayout.LayoutParams(-1, -2));
-    ui.gap(measures, 12);
-    holder[0] =
-        panel()
-            .setTitle("Display size")
-            .setMessage(
-                "Make everything smaller to fit more on screen, or larger to read it from"
-                    + " farther away. Auto sets the size from your screen and how far away you"
-                    + " sit.")
-            .setView(measures)
-            .setSelected(
-                stored == DisplaySize.AUTO
-                    ? 0
-                    : 1 + java.util.Arrays.binarySearch(DisplaySize.CHOICES, stored))
-            .setItems(
-                choices,
-                (d, i) -> {
-                  prefs()
-                      .edit()
-                      .putInt(
-                          DisplaySize.PREFERENCE_KEY,
-                          i == 0 ? DisplaySize.AUTO : DisplaySize.CHOICES[i - 1])
-                      .apply();
-                  applyDisplaySize(false);
-                })
-            .setNegativeButton("Cancel", null)
-            .create();
-    holder[0].show();
-    holder[0].setPanelSize(dp(330), -2);
-  }
-
-  /** Applies at once: every later view, panel, and grid reads the new size. */
-  private void applyDisplaySize(boolean isReopened) {
-    ui = new TvUi(this);
-    getWindow()
-        .getDecorView()
-        .post(
-            () -> {
-              render(current);
-              if (isReopened) displaySizeSetting();
-            });
-  }
-
-  /** Enters the screen's diagonal in inches, or the viewing distance in feet, for Auto. */
-  private void displayMeasureSetting(boolean isScreen) {
-    String key = isScreen ? DisplaySize.SCREEN_KEY : DisplaySize.DISTANCE_KEY;
-    float minimum =
-        isScreen ? DisplaySize.MINIMUM_SCREEN_INCHES : DisplaySize.MINIMUM_DISTANCE_FEET;
-    float maximum =
-        isScreen ? DisplaySize.MAXIMUM_SCREEN_INCHES : DisplaySize.MAXIMUM_DISTANCE_FEET;
-    float value =
-        isScreen
-            ? DisplaySize.screenInches(prefs().getFloat(key, DisplaySize.DEFAULT_SCREEN_INCHES))
-            : DisplaySize.distanceFeet(prefs().getFloat(key, DisplaySize.DEFAULT_DISTANCE_FEET));
-    String unit = isScreen ? "inches" : "feet";
-    LinearLayout form = ui.column();
-    form.setPadding(dp(4), dp(4), dp(4), dp(8));
-    EditText input = new EditText(this);
-    input.setSingleLine();
-    input.setTag("display-measure");
-    input.setInputType(
-        InputType.TYPE_CLASS_NUMBER | (isScreen ? 0 : InputType.TYPE_NUMBER_FLAG_DECIMAL));
-    input.setImeOptions(android.view.inputmethod.EditorInfo.IME_ACTION_DONE);
-    input.setText(DisplaySize.number(value));
-    input.setSelectAllOnFocus(true);
-    input.setTypeface(TvTheme.regular(this));
-    input.setTextColor(TvUi.WHITE);
-    input.setContentDescription(isScreen ? "Screen size in inches" : "Viewing distance in feet");
-    form.addView(input, new LinearLayout.LayoutParams(-1, dp(54)));
-    TvPanel d =
-        panel()
-            .setTitle(isScreen ? "Screen size" : "Viewing distance")
-            .setMessage(
-                isScreen
-                    ? "The screen's diagonal, in inches."
-                    : "How far you sit from the screen, in feet.")
-            .setView(form)
-            .setPositiveButton("Save", null)
-            .setNegativeButton("Cancel", null)
-            .create();
-    boolean[] isSaved = {false};
-    Runnable save =
-        () -> {
-          if (isSaved[0]) return;
-          float entered;
-          try {
-            entered = Float.parseFloat(input.getText().toString().trim());
-          } catch (NumberFormatException e) {
-            entered = Float.NaN;
-          }
-          if (!(entered >= minimum && entered <= maximum)) {
-            input.setError(
-                "Enter "
-                    + DisplaySize.number(minimum)
-                    + " to "
-                    + DisplaySize.number(maximum)
-                    + " "
-                    + unit);
-            return;
-          }
-          isSaved[0] = true;
-          prefs().edit().putFloat(key, entered).apply();
-          d.dismiss();
-          applyDisplaySize(true);
-        };
-    input.setOnEditorActionListener(
-        (v, action, event) -> {
-          save.run();
-          return true;
-        });
-    d.setOnShowListener(
-        v -> {
-          d.setPanelSize(dp(360), -2);
-          d.getButton(TvPanel.BUTTON_POSITIVE).setOnClickListener(b -> save.run());
-          input.requestFocus();
-        });
-    d.show();
-  }
-
-  /** The installed version, so Settings never shows a stale hand-written number. */
-  private String versionName() {
-    try {
-      return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-    } catch (Exception e) {
-      return "";
-    }
-  }
-
-  private int rewindSeconds() {
+  int rewindSeconds() {
     return prefs().getInt(RewindOnResume.PREFERENCE_KEY, RewindOnResume.DEFAULT_SECONDS);
-  }
-
-  private String rewindLabel() {
-    return "Rewind on resume · " + RewindOnResume.label(rewindSeconds());
-  }
-
-  private void rewindSetting() {
-    String[] choices = {"Off", "1 second", "3 seconds", "5 seconds", "10 seconds"};
-    int[] values = {0, 1, 3, 5, 10};
-    TvPanel dialog =
-        panel()
-            .setTitle("Rewind on resume")
-            .setMessage("Replay a little when you continue after pausing.")
-            .setSelected(java.util.Arrays.binarySearch(values, rewindSeconds()))
-            .setItems(
-                choices,
-                (d, i) -> {
-                  prefs().edit().putInt(RewindOnResume.PREFERENCE_KEY, values[i]).apply();
-                  TextView button = getWindow().getDecorView().findViewWithTag("rewind-setting");
-                  if (button != null) button.setText(rewindLabel());
-                })
-            .setNegativeButton("Cancel", null)
-            .create();
-    dialog.show();
-    dialog.setPanelSize(dp(330), -2);
   }
 
   ImageView avatar(int size) {
@@ -2914,7 +2630,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   // Playback features that live in their own classes; these are only their call sites.
 
-  private PlaybackSettings playbackSettings() {
+  PlaybackSettings playbackSettings() {
     return new PlaybackSettings(this, prefs(), this::panel, this::matchFrameRate, () -> {});
   }
 

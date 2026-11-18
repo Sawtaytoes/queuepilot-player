@@ -292,6 +292,18 @@ class ReviewProbeTest(unittest.TestCase):
             with self.subTest(sorted(head)):
                 self.assertEqual(probe(base, head), [])
 
+    def test_a_method_reference_through_a_holder_names_the_moved_method(self):
+        # An existing file's `host::setup` becomes `host.saver::setup` when setup moves to Saver.
+        other = P + 'final class Other { private final MainActivity host; Other(MainActivity host){this.host=host;} ' \
+            'Runnable fix(){return host::setup;} }'
+        base = {'MainActivity.java': P + 'class MainActivity { void setup(){} void other(){} }', 'Other.java': other}
+        head = {'MainActivity.java': P + 'class MainActivity { final Saver saver = new Saver(this); }',
+                'Saver.java': SAVER_HEAD + 'void setup(){} void other(){} }',
+                'Other.java': other.replace('host::setup', 'host.saver::setup')}
+        self.assertEqual(probe(base, head), [])
+        head['Other.java'] = other.replace('host::setup', 'host.saver::other')
+        self.assertFails(probe(base, head), 'differs')
+
     def test_object_methods_keep_their_class(self):
         base = P + 'class MainActivity { private String name(){return toString();} }'
         head = P + 'class MainActivity { final Saver saver = new Saver(this); }'

@@ -52,7 +52,7 @@ final class FullQueueScreen {
         isSignedOut
             ? "Sign in to see " + what + "."
             : "Connect your QueuePilot server to see " + what + ".");
-    Runnable fix = isSignedOut ? () -> host.navigate(new Screen("signin")) : host::queueSetup;
+    Runnable fix = isSignedOut ? () -> host.navigate(new Screen("signin")) : host.settingsScreen::queueSetup;
     host.ui.action(
         actions,
         isSignedOut ? "Sign in" : "Connect QueuePilot",
