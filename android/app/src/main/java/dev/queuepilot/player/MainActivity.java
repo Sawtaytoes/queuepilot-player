@@ -57,7 +57,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private String deviceName = DeviceName.FALLBACK;
   LinearLayout content;
   TextView status;
-  private ExoPlayer player;
+  ExoPlayer player;
   private AssPlayback assPlayback;
   private PlayerView playerView;
   private androidx.media3.session.MediaSession mediaSession;
@@ -65,7 +65,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   int mainWidth;
   private boolean fixture;
   Screen current;
-  private JSONObject nativePlan;
+  JSONObject nativePlan;
   private int nativeIndex;
   private long nativeSequence;
   private final ExecutorService progressNetwork = Executors.newSingleThreadExecutor();
@@ -83,26 +83,29 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   /** One outbox for the process, so a recreated activity never holds a stale copy. */
   private static PendingEvents sharedPendingEvents;
-  private PlexCatalog.Entry playingEntry;
-  private boolean isCastLoading;
+  PlexCatalog.Entry playingEntry;
+  boolean isCastLoading;
   private TextView skipButton;
   private List<MarkerSkip.Marker> playingMarkers = List.of();
   private MarkerSkip.Marker skipMarker;
   private long skipShownAt;
   private boolean isSkipDismissed;
   private boolean isControllerVisible;
-  private String playingOrigin = "", playingToken = "";
+  String playingOrigin = "", playingToken = "";
   /** The playing poster for the media session: JPEG bytes, and a tokenless LAN address. */
   private byte[] playingArtwork;
 
   private String playingArtworkUri = "";
   /** True while an extra plays: it reports nothing to Plex and never touches a queue. */
-  private boolean isPlayingExtra;
+  boolean isPlayingExtra;
   /** The title screen whose extras take focus when it is drawn again after its title ended. */
-  private Screen extrasFocus;
+  Screen extrasFocus;
+
+  final TitleScreen titleScreen = new TitleScreen(this);
+  final CastPanel castPanel = new CastPanel(this);
 
   /** What the screen parts in their own files ({@link TitleExtrasRow}, …) use of this activity. */
-  private final ScreenHost screenHost =
+  final ScreenHost screenHost =
       new ScreenHost() {
         public android.app.Activity activity() { return MainActivity.this; }
         public TvUi ui() { return ui; }
@@ -124,7 +127,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         }
         public void status(String text) { status.setText(text); }
         public void fillDetailFacts(LinearLayout facts, PlexCatalog.Entry entry) {
-          MainActivity.this.fillDetailFacts(facts, entry);
+          titleScreen.fillDetailFacts(facts, entry);
         }
         public void playExtra(PlexCatalog.Entry extra, View from) {
           MainActivity.this.playExtra(extra, from);
@@ -140,7 +143,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         }
       };
 
-  private final TitleNavigation titleNavigation = new TitleNavigation(screenHost);
+  final TitleNavigation titleNavigation = new TitleNavigation(screenHost);
   private long sectionFloor, sectionEnd = -1;
   private boolean advancing;
   private final Set<TvPanel> panels = new HashSet<>();
@@ -324,7 +327,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       case "profiles" -> profilePicker.chooseProfile();
       case "settings" -> settings();
       case "library" -> load(screen.path(), screen.title());
-      case "details" -> details(screen.entry());
+      case "details" -> titleScreen.details(screen.entry());
       case "demo" -> demoCatalog.demoSeason();
       case "queues" -> watchingScreen.queues();
       case "fullqueue" -> fullQueueScreen.fullQueue(screen.path(), screen.title());
@@ -557,7 +560,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     heading(eyebrow, title, 34);
   }
 
-  private TextView heading(String eyebrow, String title, int size) {
+  TextView heading(String eyebrow, String title, int size) {
     if (!eyebrow.isEmpty()) {
       content.addView(ui.text(eyebrow.toUpperCase(Locale.ROOT), 12, TvUi.ACCENT));
       ui.gap(content, 8);
@@ -713,7 +716,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
    * on a row boundary. Pages load ahead of focus in both directions; a letter jump replaces
    * the grid with a new window that starts at the letter.
    */
-  private static final class Grid {
+  static final class Grid {
     String path = "", sortParam = "", sectionKey = "";
     LibraryBrowse.Sort sort;
     int columns, pageSize, start, end, total = -1;
@@ -725,7 +728,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     String shownLetter = "";
   }
 
-  private Grid grid;
+  Grid grid;
 
   private String sortPreference(String section) {
     return "library-sort:" + activeId + ":" + profile.optString("serverId") + ":" + section;
@@ -759,7 +762,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       // A show or season lists its children under its own summary, facts and cast.
       LinearLayout header = ui.column();
       content.addView(header);
-      loadParentHeader(parent.group(1), header);
+      titleScreen.loadParentHeader(parent.group(1), header);
     }
     Grid g = new Grid();
     g.path = path;
@@ -1200,7 +1203,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return card;
   }
 
-  private Bitmap artwork(String origin, String secret, String thumb, int width) throws Exception {
+  Bitmap artwork(String origin, String secret, String thumb, int width) throws Exception {
     String path = TitleCast.transcodePath(thumb, width);
     byte[] bytes = PlexCatalog.get(PlexCatalog.url(origin, path), secret, 12 * 1024 * 1024);
     BitmapFactory.Options bounds = new BitmapFactory.Options();
@@ -1216,139 +1219,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   void loadArt(ImageView view, String thumb, int width) {
     int request = generation;
     ArtworkLoader.load(view, server(), token(), thumb, width, () -> request == generation);
-  }
-
-  private void details(PlexCatalog.Entry entry) {
-    shell("");
-    // Smaller than a screen heading: a long title still fits two lines at 1080p, then ends in an
-    // ellipsis instead of pushing Play below the fold.
-    TextView title =
-        heading(
-            entry.type().equals("episode")
-                ? entry.showTitle().isEmpty() ? "Episode " + entry.episode() : "Episode"
-                : "Your library",
-            entry.primary(),
-            26);
-    title.setTag("details-title");
-    title.setMaxLines(2);
-    title.setEllipsize(TextUtils.TruncateAt.END);
-    if (!entry.showTitle().isEmpty() && entry.type().equals("episode")) {
-      TextView line = ui.text(entry.secondary(), 17, TvUi.WHITE);
-      line.setTag("details-episode");
-      line.setMaxLines(2);
-      line.setEllipsize(TextUtils.TruncateAt.END);
-      content.addView(line);
-      ui.gap(content, 14);
-    }
-    LinearLayout row = ui.row();
-    ImageView image = new ImageView(this);
-    image.setScaleType(ImageView.ScaleType.FIT_CENTER);
-    row.addView(image, new LinearLayout.LayoutParams(dp(180), dp(270)));
-    loadArt(image, entry.thumb(), 1440);
-    LinearLayout info = ui.column();
-    info.setPadding(dp(28), dp(4), 0, 0);
-    row.addView(info, new LinearLayout.LayoutParams(0, -2, 1));
-    info.addView(ui.text("Watch with " + profileName(), 15, TvUi.MUTED));
-    ui.gap(info, 10);
-    // Year, rating, length and studio; genres; scores; watch state; director and writer.
-    LinearLayout facts = ui.column();
-    info.addView(facts);
-    fillDetailFacts(facts, entry);
-    ui.gap(info, 14);
-    TextView more = null;
-    if (!entry.summary().isBlank()) {
-      TextView summary = ui.text(entry.summary().trim(), 15, TvUi.WHITE);
-      summary.setTag("details-summary");
-      summary.setMaxLines(4);
-      summary.setEllipsize(TextUtils.TruncateAt.END);
-      summary.setLineSpacing(0, 1.12f);
-      info.addView(summary);
-      ui.gap(info, 18);
-      more =
-          ui.button(
-              "More",
-              R.drawable.lucide_text,
-              () ->
-                  panel()
-                      .setTitle(entry.primary())
-                      .setMessage(entry.summary().trim())
-                      .setPositiveButton("Close", null)
-                      .create()
-                      .show(),
-              false);
-      more.setContentDescription("More. Read the full summary");
-      // Offered only when the summary is actually cut off.
-      TextView moreButton = more;
-      moreButton.setVisibility(View.GONE);
-      summary.addOnLayoutChangeListener(
-          (v, l, t, r, b, ol, ot, or, ob) -> {
-            android.text.Layout layout = summary.getLayout();
-            boolean isClamped =
-                layout != null
-                    && layout.getLineCount() > 0
-                    && layout.getEllipsisCount(layout.getLineCount() - 1) > 0;
-            int visibility = isClamped ? View.VISIBLE : View.GONE;
-            if (moreButton.getVisibility() != visibility)
-              moreButton.post(() -> moreButton.setVisibility(visibility));
-          });
-    }
-    LinearLayout actions = ui.row();
-    TextView play = ui.button("Play", R.drawable.lucide_play, () -> playEntry(entry), true);
-    actions.addView(play);
-    // An episode is added as its show: a queue holds movies and shows.
-    boolean isEpisode = entry.type().equals("episode");
-    String addKey = isEpisode ? entry.showKey() : entry.key();
-    if (!addKey.isEmpty()) {
-      String addTitle = isEpisode ? entry.showTitle() : entry.title();
-      TextView add =
-          ui.button(
-              "Add to queue",
-              R.drawable.lucide_list_plus,
-              () -> addToQueue(addKey, addTitle, isEpisode),
-              false);
-      add.setContentDescription(
-          isEpisode ? "Add the show " + addTitle + " to a queue" : "Add to queue");
-      LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2);
-      gap.leftMargin = dp(12);
-      actions.addView(add, gap);
-    }
-    if (more != null) {
-      LinearLayout.LayoutParams gap = new LinearLayout.LayoutParams(-2, -2);
-      gap.leftMargin = dp(12);
-      actions.addView(more, gap);
-    }
-    LinearLayout.LayoutParams art = new LinearLayout.LayoutParams(-2, -2);
-    art.leftMargin = dp(12);
-    actions.addView(
-        ui.button("Artwork quality", R.drawable.lucide_image, () -> compareArt(entry), false), art);
-    // The actions scroll sideways rather than squeeze a label at a large Display size.
-    HorizontalScrollView actionScroll = new HorizontalScrollView(this);
-    actionScroll.setHorizontalScrollBarEnabled(false);
-    actionScroll.setClipToPadding(false);
-    actionScroll.addView(actions);
-    info.addView(actionScroll);
-    // Where this title leads: its show and season, and its collections once the record arrives.
-    LinearLayout links = ui.row();
-    if (isEpisode) titleNavigation.addParentLinks(links, entry);
-    ui.gap(info, 12);
-    info.addView(links);
-    content.addView(row);
-    LinearLayout castArea = ui.column();
-    content.addView(castArea);
-    fillCastRow(castArea, entry);
-    LinearLayout extrasArea = ui.column();
-    content.addView(extrasArea);
-    focusFirst(play);
-    loadFullDetails(
-        entry,
-        facts,
-        castArea,
-        full -> {
-          if (!isEpisode) titleNavigation.addCollectionLink(links, full);
-          titleNavigation.restoreFocus(() -> play);
-        });
-    // Play trailer goes beside Play, which stays first.
-    new TitleExtrasRow(screenHost).load(entry.key(), extrasArea, actions, 1, () -> play);
   }
 
   /**
@@ -1402,84 +1272,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         });
   }
 
-  /**
-   * A single title or an extra that played to its end goes back to the screen it started from. A
-   * title lands on its extras; an extra lands on itself. A later design adds an up-next screen.
-   */
-  private void returnToTitle() {
-    if (player == null || nativePlan != null || current == null || !"player".equals(current.kind()))
-      return;
-    if (!isPlayingExtra) {
-      extrasFocus = history.peek();
-      // An ended title starts on Play, then its extras: not on a button used before Play.
-      if (extrasFocus != null) focusMemory.remove(extrasFocus);
-    }
-    // "ended" was the title's last report; Back must not send a second one.
-    playingEntry = null;
-    back();
-  }
-
-  private void fillDetailFacts(LinearLayout facts, PlexCatalog.Entry entry) {
-    facts.removeAllViews();
-    String[][] lines = {
-      {"details-meta", DetailFacts.meta(entry.type(), entry.facts(), entry.duration())},
-      {"details-genres", DetailFacts.genres(entry.facts())},
-      {"details-ratings", DetailFacts.ratings(entry.facts())},
-      {
-        "details-progress",
-        DetailFacts.progress(entry.type(), entry.resume(), entry.duration(), entry.facts())
-      },
-      {"details-credits", DetailFacts.credits(entry.roles())},
-    };
-    for (String[] line : lines) {
-      if (line[1].isEmpty()) continue;
-      int color = line[0].equals("details-meta") ? TvUi.WHITE : TvUi.MUTED;
-      TextView text = ui.text(line[1], 15, color);
-      text.setTag(line[0]);
-      text.setMaxLines(2);
-      text.setEllipsize(TextUtils.TruncateAt.END);
-      facts.addView(text);
-      ui.gap(facts, 5);
-    }
-  }
-
-  /** The title's actors as a row of faces, the way the Plex detail page shows them. */
-  private void fillCastRow(LinearLayout area, PlexCatalog.Entry entry) {
-    area.removeAllViews();
-    List<JSONObject> actors = DetailFacts.actors(entry.roles());
-    if (actors.isEmpty()) return;
-    ui.gap(area, 26);
-    area.addView(ui.title("Cast", 20));
-    ui.gap(area, 12);
-    LinearLayout row = horizontalIn(area);
-    String origin = server(), secret = token();
-    for (JSONObject actor : actors.subList(0, Math.min(12, actors.size()))) {
-      LinearLayout card = ui.column();
-      card.setGravity(Gravity.CENTER_HORIZONTAL);
-      card.setPadding(dp(6), dp(8), dp(6), dp(8));
-      ImageView face = avatar(84);
-      card.addView(face);
-      loadCastPhoto(face, actor.optString("thumb"), actor.optString("name"), origin, secret);
-      ui.gap(card, 8);
-      TextView name = ui.title(actor.optString("name"), 14);
-      name.setGravity(Gravity.CENTER);
-      name.setMaxLines(2);
-      name.setEllipsize(TextUtils.TruncateAt.END);
-      card.addView(name);
-      TextView role = ui.text(actor.optString("role"), 12, TvUi.MUTED);
-      role.setGravity(Gravity.CENTER);
-      role.setMaxLines(2);
-      role.setEllipsize(TextUtils.TruncateAt.END);
-      card.addView(role);
-      ui.focusable(
-          card, () -> message(actor.optString("name"), actor.optString("role")), TvUi.BG);
-      card.setContentDescription(actor.optString("name") + ". " + actor.optString("role"));
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(124), -2);
-      lp.rightMargin = dp(10);
-      row.addView(card, lp);
-    }
-  }
-
   LinearLayout horizontalIn(LinearLayout parent) {
     HorizontalScrollView scroll = new HorizontalScrollView(this);
     scroll.setHorizontalScrollBarEnabled(false);
@@ -1491,154 +1283,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     return row;
   }
 
-  /**
-   * A listing carries only part of a title's metadata, so the full record is read once the
-   * screen is showing; an episode's cast is completed from its season and show.
-   */
-  private void loadFullDetails(
-      PlexCatalog.Entry entry,
-      LinearLayout facts,
-      LinearLayout castArea,
-      java.util.function.Consumer<PlexCatalog.Entry> loaded) {
-    if (profile == null || entry.key().isEmpty()) return;
-    int request = generation;
-    String origin = server(), secret = token();
-    network.execute(
-        () -> {
-          try {
-            JSONArray items =
-                PlexCatalog.list(
-                    PlexCatalog.get(
-                        PlexCatalog.url(origin, "/library/metadata/" + entry.key()),
-                        secret,
-                        16 * 1024 * 1024));
-            if (items.length() == 0) return;
-            PlexCatalog.Entry listed = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
-            PlexCatalog.Entry full = withInheritedCast(listed, origin, secret);
-            runOnUiThread(
-                () -> {
-                  if (request != generation) return;
-                  fillDetailFacts(facts, full);
-                  fillCastRow(castArea, full);
-                  loaded.accept(full);
-                });
-          } catch (Exception ignored) {
-            // The listing's facts stay; the screen is still usable without the full record.
-          }
-        });
-  }
-
-  private void loadParentHeader(String key, LinearLayout header) {
-    int request = generation;
-    String origin = server(), secret = token();
-    network.execute(
-        () -> {
-          try {
-            JSONArray items =
-                PlexCatalog.list(
-                    PlexCatalog.get(
-                        PlexCatalog.url(origin, "/library/metadata/" + key),
-                        secret,
-                        16 * 1024 * 1024));
-            if (items.length() == 0) return;
-            PlexCatalog.Entry listed = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
-            PlexCatalog.Entry parent = withInheritedCast(listed, origin, secret);
-            if (!Set.of("show", "season").contains(parent.type())) return;
-            runOnUiThread(
-                () -> {
-                  if (request != generation) return;
-                  LinearLayout facts = ui.column();
-                  header.addView(facts);
-                  fillDetailFacts(facts, parent);
-                  if (!parent.summary().isBlank()) {
-                    TextView summary = ui.text(parent.summary().trim(), 15, TvUi.WHITE);
-                    summary.setTag("parent-summary");
-                    summary.setMaxLines(3);
-                    summary.setEllipsize(TextUtils.TruncateAt.END);
-                    ui.gap(header, 6);
-                    header.addView(summary);
-                  }
-                  ui.gap(header, 14);
-                  LinearLayout row = ui.row();
-                  if (parent.type().equals("show"))
-                    titleNavigation.linkButton(
-                        row,
-                        "Add to queue",
-                        R.drawable.lucide_list_plus,
-                        () -> addToQueue(parent.key(), parent.title(), false));
-                  titleNavigation.addWatchedButton(row, parent, facts);
-                  if (parent.type().equals("show")) titleNavigation.addCollectionLink(row, parent);
-                  header.addView(row);
-                  Grid shown = grid;
-                  titleNavigation.restoreFocus(
-                      () -> shown == null ? null : shown.cards.get(shown.start));
-                  LinearLayout cast = ui.column();
-                  header.addView(cast);
-                  fillCastRow(cast, parent);
-                  if (parent.type().equals("show")) {
-                    LinearLayout extras = ui.column();
-                    header.addView(extras);
-                    // Play trailer leads the show's buttons.
-                    new TitleExtrasRow(screenHost)
-                        .load(
-                            parent.key(),
-                            extras,
-                            row,
-                            0,
-                            () -> shown == null ? null : shown.cards.get(shown.start));
-                  }
-                  ui.gap(header, 22);
-                });
-          } catch (Exception ignored) {
-            // The listing still works without its parent's header.
-          }
-        });
-  }
-
-  private void compareArt(PlexCatalog.Entry entry) {
-    TvPanel dialog =
-        panel()
-            .setTitle("Artwork quality")
-            .setMessage("Loading 240px and 1440px artwork…")
-            .setPositiveButton("Close", null)
-            .create();
-    dialog.show();
-    dialog.setPanelSize(dp(820), dp(550));
-    int request = generation;
-    String origin = server(), secret = token();
-    network.execute(
-        () -> {
-          try {
-            Bitmap low = artwork(origin, secret, entry.thumb(), 240),
-                high = artwork(origin, secret, entry.thumb(), 1440);
-            runOnUiThread(
-                () -> {
-                  if (request != generation || !dialog.isShowing()) return;
-                  LinearLayout images = ui.row();
-                  images.setPadding(dp(24), dp(16), dp(24), dp(16));
-                  for (Bitmap bitmap : List.of(low, high)) {
-                    LinearLayout col = ui.column();
-                    col.addView(
-                        ui.text(bitmap.getWidth() + " × " + bitmap.getHeight(), 16, TvUi.MUTED));
-                    ImageView v = new ImageView(this);
-                    v.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                    v.setImageBitmap(bitmap);
-                    col.addView(v, new LinearLayout.LayoutParams(-1, dp(330)));
-                    images.addView(col, new LinearLayout.LayoutParams(0, -2, 1));
-                  }
-                  dialog.setMessage("");
-                  dialog.setView(images);
-                });
-          } catch (Exception e) {
-            runOnUiThread(
-                () -> {
-                  if (dialog.isShowing()) dialog.setMessage("Artwork couldn't be loaded.");
-                });
-          }
-        });
-  }
-
-  private void playEntry(PlexCatalog.Entry entry) {
+  void playEntry(PlexCatalog.Entry entry) {
     status.setText("Opening video…");
     int request = generation;
     // A single title outside a queue plays as the profile the viewer chose: its token, its
@@ -1797,7 +1442,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.gap(overlay, 10);
     LinearLayout actions = ui.row();
     overlay.addView(actions);
-    ui.action(actions, "Cast", R.drawable.lucide_users, () -> showCast(playingEntry), false);
+    ui.action(actions, "Cast", R.drawable.lucide_users, () -> castPanel.showCast(playingEntry), false);
     if (!playingChapters().isEmpty()) {
       ui.action(
           actions,
@@ -1931,7 +1576,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                 advancing = true;
                 nativeIndex++;
                 loadNativeItem();
-              } else if (nativePlan == null && !advancing) handler.post(() -> returnToTitle());
+              } else if (nativePlan == null && !advancing) handler.post(() -> titleScreen.returnToTitle());
             }
           }
 
@@ -3029,7 +2674,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   /** Decodes a bounded portrait, downsampled to at most 512 pixels wide. */
-  private static Bitmap portrait(byte[] bytes) {
+  static Bitmap portrait(byte[] bytes) {
     BitmapFactory.Options bounds = new BitmapFactory.Options();
     bounds.inJustDecodeBounds = true;
     BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
@@ -3062,144 +2707,6 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         face,
         PlexCatalog.url(origin, "/api/native/people/" + PlexAccount.encode(id) + "/avatar"),
         "");
-  }
-
-  private void showCast(PlexCatalog.Entry entry) {
-    if (entry == null
-        || TitleCast.inheritedKeys(entry.type(), entry.seasonKey(), entry.showKey()).isEmpty()) {
-      castDialog(entry);
-      return;
-    }
-    if (isCastLoading) return;
-    isCastLoading = true;
-    String origin = playingOrigin, secret = playingToken;
-    int request = generation;
-    network.execute(
-        () -> {
-          PlexCatalog.Entry complete = withInheritedCast(entry, origin, secret);
-          runOnUiThread(
-              () -> {
-                isCastLoading = false;
-                if (request != generation) return;
-                if (playingEntry == entry) playingEntry = complete;
-                castDialog(complete);
-              });
-        });
-  }
-
-  /**
-   * Adds the season's and show's credits after the episode's own. Uses only the server
-   * connection that is playing the episode; a missing parent leaves the episode's credits.
-   */
-  private PlexCatalog.Entry withInheritedCast(
-      PlexCatalog.Entry entry, String origin, String secret) {
-    List<JSONObject> credits = new ArrayList<>();
-    collectCredits(credits, entry.roles());
-    for (String key : TitleCast.inheritedKeys(entry.type(), entry.seasonKey(), entry.showKey())) {
-      try {
-        JSONArray parents =
-            PlexCatalog.list(
-                PlexCatalog.get(
-                    PlexCatalog.url(origin, "/library/metadata/" + key), secret, 16 * 1024 * 1024));
-        if (parents.length() > 0)
-          collectCredits(credits, parents.getJSONObject(0).optJSONArray("roles"));
-      } catch (Exception ignored) {
-      }
-    }
-    return entry.withCast(
-        new JSONArray(
-            TitleCast.distinct(
-                credits,
-                credit -> TitleCast.identity(credit.optString("kind"), credit.optString("name")))));
-  }
-
-  private static void collectCredits(List<JSONObject> credits, JSONArray roles) {
-    if (roles == null) return;
-    for (int i = 0; i < roles.length(); i++) {
-      JSONObject credit = roles.optJSONObject(i);
-      if (credit != null) credits.add(credit);
-    }
-  }
-
-  private void loadCastPhoto(ImageView face, String thumb, String name) {
-    loadCastPhoto(face, thumb, name, playingOrigin, playingToken);
-  }
-
-  private void loadCastPhoto(
-      ImageView face, String thumb, String name, String origin, String secret) {
-    boolean isExternal = TitleCast.isExternalPhoto(thumb);
-    if (!isExternal && !(thumb.startsWith("/") && !thumb.startsWith("//"))) return;
-    int request = generation;
-    network.execute(
-        () -> {
-          Bitmap image = null;
-          try {
-            // The server resizes its own paths and proxies external portraits.
-            image = artwork(origin, secret, thumb, 360);
-          } catch (Exception ignored) {
-          }
-          if (image == null && isExternal) {
-            try {
-              // Credential-free fallback straight to the portrait host.
-              image = portrait(AvatarImage.get(thumb));
-            } catch (Exception ignored) {
-            }
-          }
-          if (image == null) return;
-          Bitmap loaded = image;
-          runOnUiThread(
-              () -> {
-                if (request != generation) return;
-                face.setImageBitmap(loaded);
-                face.setContentDescription("Photo of " + name);
-              });
-        });
-  }
-
-  private void castDialog(PlexCatalog.Entry entry) {
-    if (entry == null || entry.roles().length() == 0) {
-      message("Title cast", "No cast information is available for this title.");
-      return;
-    }
-    ScrollView scroll = new ScrollView(this);
-    LinearLayout list = ui.column();
-    list.setPadding(dp(20), dp(12), dp(20), dp(20));
-    scroll.addView(list);
-    LinearLayout row = null;
-    for (int i = 0; i < entry.roles().length(); i++) {
-      if (i % 4 == 0) {
-        row = ui.row();
-        list.addView(row);
-        ui.gap(list, 20);
-      }
-      JSONObject actor = entry.roles().optJSONObject(i);
-      if (actor == null) continue;
-      LinearLayout card = ui.column();
-      ImageView face = avatar(100);
-      card.addView(face);
-      loadCastPhoto(face, actor.optString("thumb"), actor.optString("name"));
-      ui.gap(card, 10);
-      card.addView(ui.title(actor.optString("name"), 15));
-      ui.gap(card, 5);
-      card.addView(ui.text(actor.optString("role"), 12, TvUi.MUTED));
-      ui.focusable(
-          card, () -> message(actor.optString("name"), actor.optString("role")), TvUi.PANEL);
-      card.setContentDescription(actor.optString("name") + ". " + actor.optString("role"));
-      LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(128), -2);
-      lp.setMargins(0, 0, dp(15), 0);
-      row.addView(card, lp);
-    }
-    TvPanel dialog =
-        panel()
-            .setTitle(
-                "Cast · "
-                    + entry.primary()
-                    + (entry.showTitle().isEmpty() ? "" : " · " + entry.secondary()))
-            .setView(scroll)
-            .setPositiveButton("Close", null)
-            .create();
-    dialog.show();
-    dialog.setPanelSize(dp(Math.min(680, 84 + 143 * Math.min(4, entry.roles().length()))), -2);
   }
 
   private void roundPlayerControls(View view) {
@@ -3784,7 +3291,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
    * Lists the queues a title can be added to and adds it to the chosen one. {@code isShow}
    * says the title is the show of the episode on screen, which is named in the panel.
    */
-  private void addToQueue(String ratingKey, String title, boolean isShow) {
+  void addToQueue(String ratingKey, String title, boolean isShow) {
     String origin = prefs().getString("queue-origin", "");
     if (origin.isEmpty()) {
       message(
