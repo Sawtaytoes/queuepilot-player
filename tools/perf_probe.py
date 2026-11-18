@@ -32,14 +32,6 @@ def start(extra=()):
     found=dict(re.findall(r'^(LaunchState|TotalTime|WaitTime): (\S+)',out,re.M))
     return {'state':found.get('LaunchState','?'),'total':int(found.get('TotalTime',-1)),'wait':int(found.get('WaitTime',-1))}
 
-def wait_backgrounded(seconds=15):
-    """Home has taken effect: the app's activity is no longer the resumed one."""
-    for _ in range(seconds*2):
-        resumed=[l for l in s.adb('shell','dumpsys','activity','activities').decode(errors='replace').splitlines() if 'mResumedActivity' in l or 'ResumedActivity:' in l]
-        if resumed and not any(s.PACKAGE in l for l in resumed):return
-        time.sleep(.5)
-    raise AssertionError('The app did not leave the screen after Home')
-
 def gfx_reset():s.adb('shell','dumpsys','gfxinfo',s.PACKAGE,'reset')
 
 def gfx():
@@ -126,7 +118,7 @@ def measure(label,quick):
     for _ in range(2 if quick else 4):
         s.adb('shell','am','force-stop',s.PACKAGE);time.sleep(1.5);cold.append(start());time.sleep(4)
     for _ in range(2 if quick else 4):
-        key('home',pause=.5);wait_backgrounded();hot.append(start());time.sleep(2)
+        key('home',pause=.5);s.wait_backgrounded();hot.append(start());time.sleep(2)
     result['coldStart']=cold;result['hotStart']=hot
     # A start that found the app still in front reports LaunchState UNKNOWN and no time.
     cold_ok=[r['total'] for r in cold[1:] or cold if r['state']=='COLD'];hot_ok=[r['total'] for r in hot if r['state']=='HOT']

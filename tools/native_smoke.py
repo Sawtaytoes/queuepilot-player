@@ -10,7 +10,8 @@ def wait_for(predicate):
         time.sleep(.2)
     raise AssertionError('Expected playback event did not arrive')
 def pause_and_resume():
-    """Pause, resume, and return how far playback stepped back on resume."""
+    """Pause, resume, and return how far playback stepped back on resume. The step back is short
+    of the rewind by Media3's pause delay; see smoke.is_rewind."""
     known=max((e['sequence'] for e in events()),default=-1)
     s.adb('shell','input','keyevent','127')
     wait_for(lambda:any(e['sequence']>known and e['state']=='paused' for e in events()))
@@ -38,7 +39,7 @@ s.click('Choose people');s.click('Grace');s.click('Apply');s.contains('0 queues'
 s.click('Choose people');s.click('Ada');s.click('Apply');s.contains('2 queues');s.contains('Showing 2 of 5 queues');s.shot('native-people-filter')
 s.click('Movies & Shows · 2. Ada, Grace. Picks. Plays as Ada. Play queue');time.sleep(6)
 # Rewind on resume is Off by default: resuming continues from the paused position.
-assert abs(pause_and_resume())<650
+step_back=pause_and_resume();assert s.is_rewind(step_back,0),('Rewind Off: resume continues from the pause',step_back)
 s.adb('shell','input','keyevent','127');s.contains('S1 · E9 · The signal');s.contains('Orbit Nine');s.adb('shell','input','keyevent','19');# The episode has no Role entries; its cast and faces come from the show.
 s.click('Cast');s.contains('Nadia Lane');s.contains('Captain Mira');s.contains('Omar Reed');s.contains('Lena Hart')
 s.cast_photos('Nadia Lane','Omar Reed');s.shot('native-cast-faces');s.click('Close')
@@ -80,7 +81,7 @@ s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Watching');s.cont
 # A stored choice wins over the Off default, then Off is restored for the following checks.
 s.click('Settings');s.click('Rewind on resume · Off');s.click('3 seconds');s.contains('Rewind on resume · 3 seconds')
 s.post('_native_reset');s.click('Watching');s.click('Movies & Shows · 2. Ada, Grace. Picks. Plays as Ada. Play queue');time.sleep(6)
-assert abs(pause_and_resume()-3000)<650
+step_back=pause_and_resume();assert s.is_rewind(step_back,3),('A stored 3-second rewind',step_back)
 s.adb('shell','input','keyevent','127');s.back();s.contains('Your watching queues')
 s.click('Settings');s.click('Rewind on resume · 3 seconds');s.click('Off');s.contains('Rewind on resume · Off')
 assert 'FATAL EXCEPTION' not in s.adb('logcat','-d','-b','crash').decode()

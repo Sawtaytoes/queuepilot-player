@@ -267,6 +267,21 @@ styles, positioned signs, drawings and animation. See [ASS rendering](docs/ass-r
 for its resource bounds and seek limitations.
 See [native sessions](docs/native-sessions.md).
 
+**Playback stats** (for testing; the viewer's corner panel comes with the new player design).
+`PlaybackStats` measures, once a second while shown: the video and audio bitrates at the playhead
+of the selected tracks (from the size and timestamp of every sample the demuxer reads) and their
+averages over the title, and the whole stream's rate beside Plex's stated bitrate; the network's throughput and Media3's bandwidth
+estimate; the seconds buffered ahead; a verdict on whether the connection sustains the media; the
+rebuffers and their time; and dropped frames. Each series keeps 60 seconds for a graph. The
+media rates come from the demuxer of a file played directly; for a file the server converts,
+which plays as an HLS stream, they are unknown, and the verdict uses the stated rates. The rule
+for the verdict is in `Sustainability.java`. A debuggable build shows the numbers as plain text in
+the player's top right corner after one launch with
+`adb shell am start -n dev.queuepilot.player.prototype/dev.queuepilot.player.MainActivity --ez playback-stats true`
+(`false` turns it off). With it off, the player has no stats at all. Sampling stops whenever the
+readout is hidden. On the emulator a sample costs well under a millisecond of main-thread time
+and allocates nothing; see [performance](docs/performance-2026-11.md#playback-stats-cost).
+
 This preview converts on the server only when a file can't play directly; it does not lower
 quality for a slow network. It does not import real story ordering manifests, or download media. External ASS and ASS in other containers remain
 outside the custom renderer. HDR conversion, Dolby Vision, and passthrough still need

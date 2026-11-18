@@ -63,6 +63,7 @@ Before is `main` (`57b2227`); after is this pull request. One emulator run, 2026
 | 10 | The app keeps its screen's pictures in the background. | Shield: 109 MB native heap in a cached background process. | The low-memory killer ends the app sooner, and the next start is cold. | 1 cuts each picture by 4 to 16 times. The rest needs the screen to release its pictures in `onStop` (or Compose, which drops off-screen content). | Partly done; rest with the Compose move |
 | 11 | Focus changes allocate a new drawable. | `TvUi.focusable` builds a `GradientDrawable` on every focus change. | Two small objects per D-pad press; no measured jank (Home UI thread p95 1.0 ms in both builds). | Two prebuilt drawables per view. | No change: not measurable |
 | 12 | Settings are read from disk on the main thread at startup. | StrictMode, below: four disk reads, all in `MainActivity.onCreate` (`TvUi`, `DisplaySize`, `ProfileStore`), none later. | One small file read each, before the first frame; part of the cold start. | None needed: the values are needed to lay out the first screen. If a Shield's cold start shows them, start loading the files in an `Application` subclass, before the activity. | No change: needed before the first frame |
+| 13 | Chapter images bypass the artwork loader. | Found after the audit, in 0.6.0-preview: `ChapterMenu` fetches each chapter's 240-pixel image through `MainActivity.artwork()` on the shared `network` pool, not through `ArtworkLoader`. | Each time the menu opens, it fetches the images again, and they share threads with listings. A 240-pixel image is small, so memory is not the concern. | Load chapter images through `ArtworkLoader`, for its cache, its own threads, and decoding at the view's size. | Follow-up |
 
 Unchanged by this pull request, within the emulator's noise: cold start (median **1,014 ms
 before, 1,043 ms after**), Home (median frame 135 ms and 116 ms, UI thread p95 1.0 ms in both),
@@ -125,6 +126,34 @@ build.
 The emulator draws Home's frames in 116 to 135 ms with a UI thread under 1 ms: almost all of the
 time is the software renderer, not the app. That is why Home and the title screen look the same
 in both builds. On a Shield, the GPU renders, and the UI thread numbers are the ones that matter.
+
+## Playback stats cost
+
+`PlaybackStats` (pull request #25) costs nothing unless its hidden readout is on: without it the
+player is built with Media3's own bandwidth meter and extractors, unchanged. With it on:
+
+- **Counting**, on the loading thread: each demuxed sample is one short synchronized call that
+  adds its size to a per-track, per-second counter, and each network read is one atomic add.
+  The counters hold 15 tracks of 512 seconds, about 150 KB, kept while the player lives.
+- **Sampling**, on the main thread, once a second and only while the readout can be seen. Seven
+  `stats_probe` runs on the emulator (2026-11-17, about 20 samples each) measured a mean of
+  94 to 232 µs of CPU time per sample, and a worst sample of 167 to 988 µs: about 0.02% of the
+  main thread on average. The emulator was busy with other builds; a Shield should be faster.
+- **The whole app, readout on and off.** One probe run measured 13.05 s of app CPU time over
+  15 s of playback with the readout on, and 11.14 s with it off. The engine's samples account
+  for about 4 ms of the difference. The rest is the readout's drawing over the video, other work
+  on the busy emulator, or both: the emulator decodes and draws the video in software, and one
+  pair of runs cannot tell them apart. The readout is for debugging, so this cost applies only
+  while it is turned on.
+- **Allocation**: a sample allocates nothing it keeps. `PlaybackStatsTest.aSampleAllocatesNothing`
+  measures the thread's allocated bytes over 10,000 samples: 1,184 bytes in all, about 0.1 byte
+  a sample, from the JVM's own first-call work; the test fails above 4,096.
+- **When hidden**, behind another screen or with the app in the background, it samples nothing:
+  the probe saw no sample for 6 seconds after Home. Only one stats object samples at a time: the
+  next item's stats stop the previous item's before their first sample. A released player's stats
+  also stop when Media3 reports the release, which it posts to the main thread, so one sample
+  that was already due can run first. A queue moving on to its next item does not leave the old
+  sampler running.
 
 ## Measure on a Shield (read-only)
 

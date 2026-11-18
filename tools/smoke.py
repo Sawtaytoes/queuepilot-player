@@ -198,6 +198,34 @@ def enter_pin(value):
     shot('profile-pin')
     for digit in value:click(digit)
     click('Continue')
+# Media3 freezes the position it reports at a pause at the playback thread's last update, a moment
+# before the player really stops; the resume reports where it stopped. So a measured step back on
+# resume is the rewind minus that pause delay, which is never negative: up to 659 ms on the busy
+# emulator, for 0.5.9 and 0.6.2 alike (2026-11-18; Docket task_cqi9gl0fmwlt3mgg).
+PAUSE_DELAY_MS=1000
+def is_rewind(step_back_ms,seconds):
+    """Whether a measured step back on resume is a rewind of `seconds`: short of it by less than
+    PAUSE_DELAY_MS, and past it by at most 150 ms of rounding."""
+    want=seconds*1000
+    return want-PAUSE_DELAY_MS<step_back_ms<=want+150
+RESUMED_LINE=re.compile(r'mResumedActivity|topResumedActivity|ResumedActivity:|^\s*Resumed:')
+def resumed_activities(dump=None):
+    """The resumed-activity lines of `dumpsys activity activities`. Android 12 writes
+    `mResumedActivity` and `ResumedActivity:`; Android 13 and 14 write `topResumedActivity=` and
+    `Resumed:`. Each call reads one dump."""
+    dump=dump if dump is not None else adb('shell','dumpsys','activity','activities').decode(errors='replace')
+    return [line.strip() for line in dump.splitlines() if RESUMED_LINE.search(line)]
+def is_in_front(lines):
+    """Whether these resumed-activity lines include one of the app's activities."""
+    return any(PACKAGE+'/' in line for line in lines)
+def wait_backgrounded(seconds=15):
+    """Home has taken effect: some activity is resumed, and none of it is the app's."""
+    lines=[]
+    for _ in range(seconds*2):
+        lines=resumed_activities()
+        if lines and not is_in_front(lines):return
+        time.sleep(.5)
+    raise AssertionError('The app did not leave the screen after Home',lines)
 def main():
     hardware=adb('shell','getprop','ro.hardware').decode().strip()
     assert hardware in ('ranchu','goldfish'),'This test must never target a physical TV'

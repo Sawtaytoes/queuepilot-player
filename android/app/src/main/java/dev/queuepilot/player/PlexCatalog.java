@@ -386,7 +386,8 @@ final class PlexCatalog {
                 .put("audioChannels", attribute(parser, "audioChannels"))
                 .put("container", attribute(parser, "container"))
                 .put("videoCodec", attribute(parser, "videoCodec"))
-                .put("audioCodec", attribute(parser, "audioCodec"));
+                .put("audioCodec", attribute(parser, "audioCodec"))
+                .put("bitrate", attribute(parser, "bitrate"));
         }
         else if (current != null
             && java.util.Set.of("Role", "Director", "Writer", "Producer").contains(name)) {

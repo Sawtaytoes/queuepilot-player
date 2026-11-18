@@ -18,6 +18,8 @@ native_resume={}
 SHOW_FIELDS={'102':'grandparentTitle="Orbit Nine" parentIndex="1" parentTitle="Season 1" grandparentThumb="/art/show-orbit.jpg"','103':'grandparentTitle="Harbor Lights" parentIndex="2" parentTitle="Season 2" grandparentThumb="/art/show-harbor.jpg"'}
 native_offline=False
 video_fixture='sample.mp4'
+# The video's pace in bits per second, or 0 for full speed: POST /_video_kbps/<n>.
+video_bps=0
 markers=False
 # Plex's stream metadata for tracks.mkv: '' (none sent), 'selected' (Plex marks Commentary and
 # Signs and songs), 'external' (Plex marks a subtitle file beside the media), or 'account' (Plex
@@ -253,10 +255,11 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data,str): data=data.encode()
         self.send_response(code); self.send_header('Content-Type',mime); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers, plex_tracks, stream_choice, conversion_refused, hide_extras
+        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers, plex_tracks, stream_choice, conversion_refused, hide_extras, video_bps
         path=urlparse(self.path).path
         if path=='/_offline': offline=True; self.respond('ok');return
         if path=='/_ass': video_fixture='styled.mkv';self.respond('ok');return
+        if path.startswith('/_video_kbps/'): video_bps=int(path.rsplit('/',1)[1])*1000;self.respond('ok');return
         if path=='/_tracks': video_fixture='tracks.mkv';self.respond('ok');return
         if path=='/_unnamed_tracks': video_fixture='tracks.mp4';self.respond('ok');return
         if path=='/_markers': markers=True;self.respond('ok');return
@@ -264,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/_conversion_refused': conversion_refused=True;self.respond('ok');return
         if path.startswith('/_plex_tracks/'):
             plex_tracks=path.split('/')[-1];stream_choice=dict(STREAM_CHOICES[plex_tracks]);video_fixture='tracks.mkv';stream_saves.clear();self.respond('ok');return
-        if path=='/_online': conversion_refused=False;plex_tracks='';stream_choice.clear();video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;watched_marks.clear();hide_extras=False;self.respond('ok');return
+        if path=='/_online': conversion_refused=False;plex_tracks='';stream_choice.clear();video_fixture='sample.mp4';video_bps=0;markers=False;offline=False; cloud_offline=False; native_offline=False;watched_marks.clear();hide_extras=False;self.respond('ok');return
         if path=='/_no_extras':hide_extras=True;self.respond('ok');return
         if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();queue_adds.clear();unlocks.clear();native_calls.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_unlock_reset':unlocks.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
@@ -501,11 +504,22 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/video/sample.mp4':
             data=(ROOT/video_fixture).read_bytes();start=0;end=len(data)-1;range_header=self.headers.get('Range','')
             if range_header.startswith('bytes='):
-                values=range_header[6:].split('-');start=int(values[0]);end=int(values[1]) if values[1] else end
+                values=range_header[6:].split('-');start=int(values[0]);end=min(int(values[1]),end) if values[1] else end
+                if start>end:
+                    self.send_response(416);self.send_header('Content-Range',f'bytes */{len(data)}');self.send_header('Content-Length','0');self.end_headers();return
             self.send_response(206 if range_header else 200);self.send_header('Content-Type','video/x-matroska' if video_fixture.endswith('.mkv') else 'video/x-ms-asf' if video_fixture.endswith('.wmv') else 'video/mp4');self.send_header('Accept-Ranges','bytes');self.send_header('Content-Length',str(end-start+1));
             if range_header:self.send_header('Content-Range',f'bytes {start}-{end}/{len(data)}')
             self.end_headers()
-            try:self.wfile.write(data[start:end+1])
+            try:
+                # A slow network, for the playback stats probe: 16 KiB at a time, paced. The rate is
+                # read once per chunk, so a reset to full speed mid-response sends the rest at once.
+                at=start
+                while at<=end:
+                    pace=video_bps
+                    if not pace:self.wfile.write(data[at:end+1]);break
+                    chunk=data[at:min(at+16384,end+1)]
+                    if not chunk:break
+                    self.wfile.write(chunk);at+=len(chunk);time.sleep(len(chunk)*8/pace)
             except (BrokenPipeError,ConnectionResetError):pass
             return
         self.respond('missing',code=404)

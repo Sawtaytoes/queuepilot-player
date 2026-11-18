@@ -122,6 +122,19 @@ next-item playback and natural completion. The fixture episodes carry no Role en
 own; their cast comes from the show, and one portrait is an external HTTPS URL that only the
 fixture server's transcoder can serve. A cast card is described as `Photo of <name>` only after
 its portrait has been decoded and shown, which is what the checks wait for.
+
+The resume rewind is measured from the playback events: the position reported at the pause,
+then the one reported at the resume. When the app pauses, Media3 reports the position as of the
+playback thread's last update, a moment before the player really stops; the resume reports
+where it stopped. Playback does not jump, but the measured step back is the rewind minus that
+pause delay, which is never negative. On the busy lab emulator on 2026-11-18 the delay reached
+581 ms for 0.5.9 and 659 ms for 0.6.2, in eight pauses each, so the old limit of 650 ms either
+way was too tight and could not catch a one-second rewind. `smoke.is_rewind` accepts a step
+back for a rewind of R seconds when `R*1000 - 1000 < step back <= R*1000 + 150`: up to one second
+of delay, and 150 ms past for rounding. A one-second rewind still fails the Off check unless the
+delay passes 850 ms. `tools/smoke_rewind_test.py` tests the bound. The measurements are in
+Docket `task_cqi9gl0fmwlt3mgg`.
+
 `markers_smoke.py` runs after the native check, which connects the fixture QueuePilot server.
 It enables intro, mid-credits and final-credits markers on one episode and checks both
 library and queue playback: each skip button takes focus, Enter lands after the marker, and
@@ -342,6 +355,27 @@ focus, then OK. No check retries a choice. It reads the focused row after each k
 size or the panel stays open after OK. The probe also tried to read, from the system's event
 log, when the panel's window took key input. It could not determine that time, so it is not
 known.
+
+## Playback stats probe
+
+`tools/stats_probe.py` checks the playback stats and is run on its own, not by `tv-checks.sh`,
+because it slows the shared emulator's network for a minute:
+
+```sh
+queuepilot-test run --source /source/.worktrees/<branch> --label '<branch> stats' -- \
+  python3 -u /source/.worktrees/<branch>/tools/stats_probe.py
+```
+
+It turns the hidden readout on and plays the fixture episode: about one sample a second is
+logged under the `PlaybackStats` tag, the average video and audio rates add up to the file's
+own size over its 30 seconds (within 10%), and the verdict is sustainable. Paused, it still
+samples, at most once a second. It sends the app to the background and checks that sampling
+stops. It has the fixture server send the video at 3 Mb/s (`POST /_video_kbps/3000`, under the
+clip's 4.8 Mb/s) and expects "not sustainable", then restores full speed whatever the result. The
+emulator console's `network speed` does not slow the guest's Wi-Fi, so the probe paces the
+source instead. Last, it turns the
+readout off: no samples and no readout. It prints the engine's CPU time per sample and the app's
+CPU time over 15 seconds of playback with the readout on and off.
 
 ## Lucide icons
 

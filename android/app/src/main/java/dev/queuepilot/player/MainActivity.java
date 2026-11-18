@@ -1494,8 +1494,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     AssPlayback ass = new AssPlayback(this, dataSourceFactory, android.net.Uri.parse(url));
     assPlayback = ass;
     playerView.getOverlayFrameLayout().addView(ass.overlay, new FrameLayout.LayoutParams(-1, -1));
+    PlaybackStats playbackStats = PlaybackStatsOverlay.create(this); // null unless turned on
     player =
-        new ExoPlayer.Builder(this, ass.renderers(this))
+        PlaybackStatsTaps.tap(
+                playbackStats, new ExoPlayer.Builder(this, ass.renderers(this)), this)
             .setSeekBackIncrementMs(SkipIntervals.backMs(PlaybackSettings.back(prefs())))
             .setSeekForwardIncrementMs(
                 SkipIntervals.forwardMs(
@@ -1508,10 +1510,12 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     .setPrioritizeTimeOverSizeThresholds(false)
                     .build())
             .setMediaSourceFactory(
-                new DefaultMediaSourceFactory(dataSourceFactory, ass.extractors()))
+                new DefaultMediaSourceFactory(
+                    dataSourceFactory, PlaybackStatsTaps.tap(playbackStats, ass.extractors())))
             .build();
     mediaSession = new androidx.media3.session.MediaSession.Builder(this, player).build();
     playerView.setPlayer(player);
+    PlaybackStatsOverlay.show(playbackStats, player, root, playingEntry);
     playerView.setShowSubtitleButton(true);
     applyCaptionStyle();
     installPlaybackMenus();
