@@ -107,6 +107,18 @@ gear('Subtitles');assert len(selected())==1 and 'Sidecar' in selected()[0],selec
 assert any(r['path']=='/library/streams/9005' and r['profile']=='ada' for r in fetch('_requests'))
 s.back();s.contains('Watch with Ada')
 
+# 4b. An extra plays its own file's tracks: the trailer on the show's screen never loads the
+# episode's subtitle file that just played.
+def sidecars():return len([r for r in fetch('_requests') if r['path']=='/library/streams/9005'])
+s.back();s.back();wait_for(lambda:'Play trailer' in s.text(),'the show with Play trailer')
+before=sidecars();s.click('Play trailer')
+wait_for(lambda:any(n.get('resource-id','').endswith(':id/exo_play_pause') for n in nodes()),'the trailer')
+time.sleep(3);assert sidecars()==before,'The trailer loaded the episode subtitle file'
+for _ in range(4):
+    if 'Play trailer' in s.text():break
+    s.back();time.sleep(.5)
+s.click('Season 1');s.click('Orbit Nine, S1 · E9 · The signal');s.contains('Watch with Ada')
+
 # 5. Plex selected nothing: the account's languages decide. Japanese audio is foreign to an
 # English account, so English subtitles show, and the full ones rather than the forced.
 s.post('_plex_tracks/account');s.click('Play');s.answer_resume('Start from the beginning');time.sleep(2);key(127)
@@ -145,4 +157,4 @@ s.back();s.contains('Your watching queues')
 s.click('Settings');s.click('Playback');s.click('Skip back · 15 seconds');s.click('10 seconds');s.contains('Skip back · 10 seconds');s.back()
 assert 'FATAL EXCEPTION' not in s.adb('logcat','-d','-b','crash').decode()
 s.post('_online');s.post('_native_reset')
-print('PASS: Plex-selected audio and subtitles, choices saved per profile (library as Ada, queue as Grace), a sidecar subtitle, account languages when Plex selects nothing, the resume question, chapters with pictures, length-based skip amounts, frame-rate requests, and playback options from Settings and the player',flush=True)
+print('PASS: Plex-selected audio and subtitles, choices saved per profile (library as Ada, queue as Grace), a sidecar subtitle that a trailer played next never loads, account languages when Plex selects nothing, the resume question, chapters with pictures, length-based skip amounts, frame-rate requests, and playback options from Settings and the player',flush=True)

@@ -96,6 +96,51 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private byte[] playingArtwork;
 
   private String playingArtworkUri = "";
+  /** True while an extra plays: it reports nothing to Plex and never touches a queue. */
+  private boolean isPlayingExtra;
+  /** The title screen whose extras take focus when it is drawn again after its title ended. */
+  private Screen extrasFocus;
+
+  /** What the screen parts in their own files ({@link TitleExtrasRow}, …) use of this activity. */
+  private final ScreenHost screenHost =
+      new ScreenHost() {
+        public android.app.Activity activity() { return MainActivity.this; }
+        public TvUi ui() { return ui; }
+        public int generation() { return generation; }
+        public String server() { return MainActivity.this.server(); }
+        public String token() { return MainActivity.this.token(); }
+        public String profileName() { return MainActivity.this.profileName(); }
+        public void background(Runnable work) { network.execute(work); }
+        public void openLibrary(String path, String title) {
+          navigate(new Screen("library", path, title, null));
+        }
+        public void message(String title, String text) { MainActivity.this.message(title, text); }
+        public TvPanel.Builder panel() { return MainActivity.this.panel(); }
+        public void loadArt(ImageView view, String thumb, int width) {
+          MainActivity.this.loadArt(view, thumb, width);
+        }
+        public LinearLayout horizontalIn(LinearLayout parent) {
+          return MainActivity.this.horizontalIn(parent);
+        }
+        public void status(String text) { status.setText(text); }
+        public void fillDetailFacts(LinearLayout facts, PlexCatalog.Entry entry) {
+          MainActivity.this.fillDetailFacts(facts, entry);
+        }
+        public void playExtra(PlexCatalog.Entry extra, View from) {
+          MainActivity.this.playExtra(extra, from);
+        }
+        public View rememberedView() {
+          String key = focusMemory.getOrDefault(current, "");
+          return key.isEmpty() ? null : rememberedFocus(getWindow().getDecorView(), key);
+        }
+        public boolean takeExtrasFocus() {
+          boolean isEnded = extrasFocus != null && extrasFocus == current;
+          if (isEnded) extrasFocus = null;
+          return isEnded;
+        }
+      };
+
+  private final TitleNavigation titleNavigation = new TitleNavigation(screenHost);
   private long sectionFloor, sectionEnd = -1;
   private boolean advancing;
   private final Set<TvPanel> panels = new HashSet<>();
@@ -243,6 +288,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   void navigate(Screen screen) {
+    extrasFocus = null;
     if (current != null) {
       View focused = getWindow().getDecorView().findFocus();
       if (focused != null) focusMemory.put(current, focusKey(focused));
@@ -543,6 +589,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   }
 
   private String focusKey(View view) {
+    if (view.getTag() instanceof ScreenHost.FocusKey key) return key.value();
     if (view.getContentDescription() != null && view.getContentDescription().length() > 0)
       return view.getContentDescription().toString();
     return view instanceof TextView ? ((TextView) view).getText().toString() : "";
@@ -1280,12 +1327,96 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     actionScroll.setClipToPadding(false);
     actionScroll.addView(actions);
     info.addView(actionScroll);
+    // Where this title leads: its show and season, and its collections once the record arrives.
+    LinearLayout links = ui.row();
+    if (isEpisode) titleNavigation.addParentLinks(links, entry);
+    ui.gap(info, 12);
+    info.addView(links);
     content.addView(row);
     LinearLayout castArea = ui.column();
     content.addView(castArea);
     fillCastRow(castArea, entry);
+    LinearLayout extrasArea = ui.column();
+    content.addView(extrasArea);
     focusFirst(play);
-    loadFullDetails(entry, facts, castArea);
+    loadFullDetails(
+        entry,
+        facts,
+        castArea,
+        full -> {
+          if (!isEpisode) titleNavigation.addCollectionLink(links, full);
+          titleNavigation.restoreFocus(() -> play);
+        });
+    // Play trailer goes beside Play, which stays first.
+    new TitleExtrasRow(screenHost).load(entry.key(), extrasArea, actions, 1, () -> play);
+  }
+
+  /**
+   * Plays an extra and comes back to this screen. An extra reports nothing to Plex, so it is
+   * never marked watched, never moves the title's resume point, and never touches a queue.
+   */
+  private void playExtra(PlexCatalog.Entry extra, View from) {
+    if (current != null && from != null) focusMemory.put(current, focusKey(from));
+    int request = generation;
+    String origin = server(), secret = token();
+    network.execute(
+        () -> {
+          try {
+            PlexCatalog.Entry detail = extra;
+            if (detail.part().isEmpty()) {
+              JSONArray items =
+                  PlexCatalog.list(
+                      PlexCatalog.get(
+                          PlexCatalog.url(origin, "/library/metadata/" + extra.key()),
+                          secret,
+                          4 * 1024 * 1024));
+              detail = PlexCatalog.Entry.fromJson(items.getJSONObject(0));
+            }
+            String url = PlexCatalog.url(origin, detail.part());
+            PlexCatalog.Entry playing = detail;
+            runOnUiThread(
+                () -> {
+                  if (request != generation) return;
+                  nativePlan = null;
+                  playingEntry = playing;
+                  playingArtwork = null;
+                  playingArtworkUri = "";
+                  playingOrigin = origin;
+                  playingToken = secret;
+                  sectionFloor = 0;
+                  sectionEnd = -1;
+                  advancing = false;
+                  isPlayingExtra = true;
+                  // An extra plays its file's own tracks: never the last title's choices or
+                  // subtitle files, and a track change in it is not saved to Plex.
+                  playbackTracks = null;
+                  startPlayer(url, secret, playing.title(), "");
+                });
+          } catch (Exception e) {
+            runOnUiThread(
+                () -> {
+                  if (request == generation)
+                    message("Extras", "This extra couldn't be opened for direct playback.");
+                });
+          }
+        });
+  }
+
+  /**
+   * A single title or an extra that played to its end goes back to the screen it started from. A
+   * title lands on its extras; an extra lands on itself. A later design adds an up-next screen.
+   */
+  private void returnToTitle() {
+    if (player == null || nativePlan != null || current == null || !"player".equals(current.kind()))
+      return;
+    if (!isPlayingExtra) {
+      extrasFocus = history.peek();
+      // An ended title starts on Play, then its extras: not on a button used before Play.
+      if (extrasFocus != null) focusMemory.remove(extrasFocus);
+    }
+    // "ended" was the title's last report; Back must not send a second one.
+    playingEntry = null;
+    back();
   }
 
   private void fillDetailFacts(LinearLayout facts, PlexCatalog.Entry entry) {
@@ -1365,7 +1496,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
    * screen is showing; an episode's cast is completed from its season and show.
    */
   private void loadFullDetails(
-      PlexCatalog.Entry entry, LinearLayout facts, LinearLayout castArea) {
+      PlexCatalog.Entry entry,
+      LinearLayout facts,
+      LinearLayout castArea,
+      java.util.function.Consumer<PlexCatalog.Entry> loaded) {
     if (profile == null || entry.key().isEmpty()) return;
     int request = generation;
     String origin = server(), secret = token();
@@ -1386,6 +1520,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                   if (request != generation) return;
                   fillDetailFacts(facts, full);
                   fillCastRow(castArea, full);
+                  loaded.accept(full);
                 });
           } catch (Exception ignored) {
             // The listing's facts stay; the screen is still usable without the full record.
@@ -1423,21 +1558,35 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                     ui.gap(header, 6);
                     header.addView(summary);
                   }
-                  if (parent.type().equals("show")) {
-                    ui.gap(header, 14);
-                    LinearLayout row = ui.row();
-                    TextView add =
-                        ui.button(
-                            "Add to queue",
-                            R.drawable.lucide_list_plus,
-                            () -> addToQueue(parent.key(), parent.title(), false),
-                            false);
-                    row.addView(add);
-                    header.addView(row);
-                  }
+                  ui.gap(header, 14);
+                  LinearLayout row = ui.row();
+                  if (parent.type().equals("show"))
+                    titleNavigation.linkButton(
+                        row,
+                        "Add to queue",
+                        R.drawable.lucide_list_plus,
+                        () -> addToQueue(parent.key(), parent.title(), false));
+                  titleNavigation.addWatchedButton(row, parent, facts);
+                  if (parent.type().equals("show")) titleNavigation.addCollectionLink(row, parent);
+                  header.addView(row);
+                  Grid shown = grid;
+                  titleNavigation.restoreFocus(
+                      () -> shown == null ? null : shown.cards.get(shown.start));
                   LinearLayout cast = ui.column();
                   header.addView(cast);
                   fillCastRow(cast, parent);
+                  if (parent.type().equals("show")) {
+                    LinearLayout extras = ui.column();
+                    header.addView(extras);
+                    // Play trailer leads the show's buttons.
+                    new TitleExtrasRow(screenHost)
+                        .load(
+                            parent.key(),
+                            extras,
+                            row,
+                            0,
+                            () -> shown == null ? null : shown.cards.get(shown.start));
+                  }
                   ui.gap(header, 22);
                 });
           } catch (Exception ignored) {
@@ -1528,6 +1677,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                       start -> {
                         if (request != generation) return;
                         nativePlan = null;
+                        isPlayingExtra = false;
                         playingEntry = detail;
                         playingArtwork = artwork;
                         playingArtworkUri = artworkUri;
@@ -1781,7 +1931,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
                 advancing = true;
                 nativeIndex++;
                 loadNativeItem();
-              }
+              } else if (nativePlan == null && !advancing) handler.post(() -> returnToTitle());
             }
           }
 
@@ -3466,6 +3616,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
    */
   private void reportPlayback(String state, boolean isDurable) {
     if (player == null || playingEntry == null) return;
+    // An extra is never scrobbled and never moves a resume point; a queue never plays one.
+    if (isPlayingExtra && nativePlan == null) return;
     long position = Math.max(0, player.getCurrentPosition()),
         duration = Math.max(0, playingDuration());
     String origin = playingOrigin, secret = playingToken, key = playingEntry.key();

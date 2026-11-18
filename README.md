@@ -94,6 +94,30 @@ and episode counts, studio, genres, critic and audience scores, time left or epi
 watched, director and writers, and a cast row with portraits. A show's season list and a
 season's episode list start with the same facts for that show or season.
 
+**Extras.** A title screen and a show's season list show the title's extras from Plex
+(`/library/metadata/<key>/extras`) in one row per kind: Trailers, Behind the scenes, Deleted
+scenes, Featurettes, Interviews, Scenes, Shorts, and Other (music videos and anything else Plex
+names). Plex's numbered `extraType` decides the kind; its `subtype` word is read when the number
+is missing. **Play trailer**, beside Play, starts the first trailer. An extra reports nothing to
+Plex and never touches a queue, so it is never marked watched and never moves the title's resume
+point. Back, or the extra's end, returns to the same title screen with focus on the extra. A movie
+or episode played from its title screen, outside a queue, also returns to its title screen when
+it ends, with focus on its first extra (or on Play when it has none); a queue still moves to its
+next item.
+
+**Go to show**, **Go to season**, and **Go to collection.** An episode's title screen opens its
+show or its season; when a listing leaves out the season's key, the episode's record supplies it.
+A movie's title screen and a show's season list offer Go to collection when the title has
+`Collection` tags: one collection opens at once, and several open a side panel to choose from.
+The collection is found by name in `/library/sections/<key>/collections` and opens in its own
+order (`/library/collections/<key>/children`); if the name is not listed, the section filtered to
+the collection's tag is shown instead, in the section's order.
+
+**Mark watched** on a show's or a season's list opens a panel that says how many episodes it
+changes, for which profile, and how many are watched now. **Watched** sends Plex's `/:/scrobble`
+and **Unwatched** sends `/:/unscrobble` on the show or season, with the chosen profile's token;
+Cancel changes nothing. The facts line then shows the new count.
+
 **Look.** The colors, radii, and type are the QueuePilot web app's: Charcuterie's `daylight`
 variant in the dark scheme, with Charcuterie's categorical Lime as the accent and a 3 dp lime
 focus ring. Every color is a named token in `TvTheme.java`, the only file allowed to hold a
@@ -288,7 +312,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.6.1.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.6.2.md).
 `tools/perf_probe.py` measures start time, frames, memory, and main-thread work in the
 emulator; see [performance](docs/performance-2026-11.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)

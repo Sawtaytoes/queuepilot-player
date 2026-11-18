@@ -59,3 +59,5 @@ fast-forward
 rewind
 monitor-play
 server-cog
+clapperboard
+layers

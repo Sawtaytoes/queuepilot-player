@@ -59,10 +59,25 @@ LONG_SUMMARY=' '.join(['A retired lantern keeper sails north to relight seven li
 FILMS=[(301,LONG_TITLE,LONG_SUMMARY),(302,'Glass City','A courier crosses a city built from glass.')]+[(300+i,t,'An invented film for the browsing fixture.') for i,t in enumerate(['Paper Moons','The Quiet Orchard','Signal Fire','North of Tomorrow','Salt and Copper','Small Hours','Kite Season','The Lantern Road','Low Tide','Blue Hour'],3)]
 # Full metadata for one film, as /library/metadata/<key> returns it: the facts, genres and
 # credits the title screen shows, and a resume point partway through.
-GLASS_CITY=('<MediaContainer><Video ratingKey="302" type="movie" title="Glass City" year="2024" contentRating="PG" studio="Lantern Pictures" rating="8.1" audienceRating="7.6" duration="6720000" viewOffset="4440000" summary="A courier crosses a city built from glass." thumb="/art/poster.jpg">'
+GLASS_CITY=('<MediaContainer><Video ratingKey="302" type="movie" title="Glass City" librarySectionID="2" year="2024" contentRating="PG" studio="Lantern Pictures" rating="8.1" audienceRating="7.6" duration="6720000" viewOffset="4440000" summary="A courier crosses a city built from glass." thumb="/art/poster.jpg">'
     '<Media videoResolution="1080" audioChannels="6"><Part id="1302" key="/video/sample.mp4"/></Media>'
     '<Genre tag="Drama"/><Genre tag="Mystery"/><Director tag="Ines Cole"/><Writer tag="Theo Marsh"/>'
-    '<Role tag="Mara Quill" role="The courier" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="The glazier" thumb="/art/omar.jpg"/></Video></MediaContainer>')
+    '<Role tag="Mara Quill" role="The courier" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="The glazier" thumb="/art/omar.jpg"/>'
+    # Glass City is in two collections, so Go to collection asks which one.
+    '<Collection id="71" filter="collection=71" tag="Glass Saga"/><Collection id="73" filter="collection=73" tag="City Stories"/></Video></MediaContainer>')
+# Extras of several kinds, listed out of order, as /library/metadata/<key>/extras returns them.
+# Each plays the 30-second clip; none of them may be scrobbled or reported.
+def extra_xml(key,extra_type,subtype,title):
+    return f'<Video ratingKey="{key}" key="/library/metadata/{key}" type="clip" extraType="{extra_type}" subtype="{subtype}" title="{title}" duration="30000" thumb="/art/poster.jpg"><Media><Part id="1{key}" key="/video/sample.mp4"/></Media></Video>'
+EXTRAS={'302':[('3027','12','other','Gag reel'),('3021','1','trailer','Teaser'),('3023','5','behindTheScenes','Building the glass city'),('3022','1','trailer','Official trailer'),('3024','2','deleted','The alley chase'),('3025','10','featurette','On glass'),('3026','3','interview','Ines Cole on light'),('3028','1','trailer','Official trailer')],
+    '303':[('3031','10','featurette','Making paper moons')],'100':[('1001','1','trailer','Orbit Nine trailer')]}
+# Collections: two hold Glass City; Orbit Nine is in one, which opens directly.
+COLLECTIONS={'1':[('803','Relay Station Tales',['100'])],'2':[('801','Glass Saga',['302','304']),('802','City Stories',['305','302','303'])]}
+# Watched marks each profile set on a show or season through /:/scrobble and /:/unscrobble,
+# by (token, ratingKey), so one profile's marks never show for another.
+watched_marks={}
+# A check turns extras off to see a title without any; /_online turns them back on.
+hide_extras=False
 # Seek thumbnails for the 30-second clip: a Roku BIF with a frame every five seconds. Each
 # frame is a different fixture JPEG, so the preview shows which frame was chosen.
 def bif():
@@ -145,6 +160,10 @@ def addable_title(key):
     if key in ('102','103'):return 'episode'
     return None
 queue_adds=[]
+def viewed(token,key,total,default):
+    """A show's or season's watched count for one profile: all or none after that profile's mark."""
+    mark=watched_marks.get((token,key))
+    return default if mark is None else total if mark else 0
 # Intro, mid-credits and final credits for the 30-second clip, in Plex's millisecond offsets.
 MARKERS='<Marker type="intro" startTimeOffset="6000" endTimeOffset="14000"/><Marker type="credits" startTimeOffset="18000" endTimeOffset="21000"/><Marker type="credits" final="1" startTimeOffset="25000" endTimeOffset="30000"/>'
 # Reserved example domain: the guest has no route to it, so only the server transcoder can serve it.
@@ -234,7 +253,7 @@ class Handler(BaseHTTPRequestHandler):
         if isinstance(data,str): data=data.encode()
         self.send_response(code); self.send_header('Content-Type',mime); self.send_header('Content-Length',str(len(data))); self.end_headers(); self.wfile.write(data)
     def do_POST(self):
-        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers, plex_tracks, stream_choice, conversion_refused
+        global offline, cloud_offline, next_pin, expire_next, native_offline, video_fixture, markers, plex_tracks, stream_choice, conversion_refused, hide_extras
         path=urlparse(self.path).path
         if path=='/_offline': offline=True; self.respond('ok');return
         if path=='/_ass': video_fixture='styled.mkv';self.respond('ok');return
@@ -245,7 +264,8 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/_conversion_refused': conversion_refused=True;self.respond('ok');return
         if path.startswith('/_plex_tracks/'):
             plex_tracks=path.split('/')[-1];stream_choice=dict(STREAM_CHOICES[plex_tracks]);video_fixture='tracks.mkv';stream_saves.clear();self.respond('ok');return
-        if path=='/_online': conversion_refused=False;plex_tracks='';stream_choice.clear();video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;self.respond('ok');return
+        if path=='/_online': conversion_refused=False;plex_tracks='';stream_choice.clear();video_fixture='sample.mp4';markers=False;offline=False; cloud_offline=False; native_offline=False;watched_marks.clear();hide_extras=False;self.respond('ok');return
+        if path=='/_no_extras':hide_extras=True;self.respond('ok');return
         if path=='/_native_reset':native_events.clear();native_sessions.clear();native_resume.clear();queue_marks.clear();native_starts.clear();history_requests.clear();queue_adds.clear();unlocks.clear();native_calls.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_unlock_reset':unlocks.clear();unlock_state.update(wrong=0,until=0.0);self.respond('ok');return
         if path=='/_native_offline':native_offline=True;self.respond('ok');return
@@ -418,6 +438,25 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(first_characters(path.split('/')[3]));return
         if path=='/hubs/search':
             self.respond(search_hubs(query.get('query',[''])[0],query.get('sectionId',[''])[0]));return
+        if path in ('/:/scrobble','/:/unscrobble'):
+            watched_marks[(token,query.get('key',[''])[0])]=path=='/:/scrobble';self.respond('<MediaContainer/>');return
+        if path.startswith('/library/metadata/') and path.endswith('/extras'):
+            found=None if hide_extras else EXTRAS.get(path.split('/')[3])
+            if found is None:self.respond('<MediaContainer size="0"/>');return
+            self.respond(f'<MediaContainer size="{len(found)}">'+''.join(extra_xml(*e) for e in found)+'</MediaContainer>');return
+        if path.startswith('/library/sections/') and path.endswith('/collections'):
+            found=COLLECTIONS.get(path.split('/')[3],[])
+            self.respond('<MediaContainer>'+''.join(f'<Directory ratingKey="{k}" key="/library/collections/{k}/children" type="collection" title="{t}" thumb="/art/poster.jpg" childCount="{len(m)}"/>' for k,t,m in found)+'</MediaContainer>');return
+        if path.startswith('/library/collections/') and path.endswith('/children'):
+            members=next((m for c in COLLECTIONS.values() for k,_,m in c if k==path.split('/')[3]),None)
+            if members is None:self.respond('missing',code=404);return
+            film_facts={str(k):(t,d) for k,t,d in FILMS};shows={f['key']:f for f in SECTION_SHOWS}
+            self.respond('<MediaContainer>'+''.join(show_xml(shows[m]) if m in shows else film_xml({'key':m,'title':film_facts[m][0],'summary':film_facts[m][1]}) for m in members)+'</MediaContainer>');return
+        if path=='/library/metadata/303':
+            # Paper Moons plays the 30-second clip from the start, so its end can be reached.
+            from xml.sax.saxutils import quoteattr
+            key=path.split('/')[3];title,summary=next((t,d) for k,t,d in FILMS if str(k)==key)
+            self.respond(f'<MediaContainer><Video ratingKey="{key}" type="movie" title={quoteattr(title)} librarySectionID="2" year="2024" duration="30000" summary={quoteattr(summary)} thumb="/art/poster.jpg"><Media><Part id="1{key}" key="/video/sample.mp4"/></Media><Collection id="73" tag="City Stories"/></Video></MediaContainer>');return
         if path=='/library/metadata/100/children':
             self.respond('<MediaContainer><Directory ratingKey="101" type="season" title="Season 1" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/101/children':
@@ -427,11 +466,12 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/library/metadata/201/children':
             self.respond(f'<MediaContainer><Video ratingKey="103" grandparentRatingKey="200" type="episode" index="3" title="The return" thumb="/art/poster.jpg" {SHOW_FIELDS["103"]}/></MediaContainer>');return
         if path in ('/library/metadata/100','/library/metadata/200'):
+            collection='<Collection id="75" tag="Relay Station Tales"/>' if path.endswith('100') else ''
             # Like many anime libraries, the show holds the cast and its episodes carry no Role.
             # One portrait is a server path; the other is an external HTTPS portrait host.
-            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" type="show" title="{"Orbit Nine" if path.endswith("100") else "Harbor Lights"}" year="2021" contentRating="TV-PG" studio="Northlight Studio" childCount="1" leafCount="12" viewedLeafCount="3" summary="A relay crew keeps a distant station talking to home." thumb="/art/poster.jpg"><Genre tag="Science Fiction"/><Genre tag="Drama"/><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="{EXTERNAL_PORTRAIT}"/></Directory></MediaContainer>');return
+            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" type="show" title="{"Orbit Nine" if path.endswith("100") else "Harbor Lights"}" year="2021" contentRating="TV-PG" studio="Northlight Studio" childCount="1" leafCount="12" viewedLeafCount="{viewed(token,path.split("/")[-1],12,3)}" librarySectionID="1" summary="A relay crew keeps a distant station talking to home." thumb="/art/poster.jpg"><Genre tag="Science Fiction"/><Genre tag="Drama"/><Role tag="Nadia Lane" role="Captain Mira" thumb="/art/nadia.jpg"/><Role tag="Omar Reed" role="Sol" thumb="{EXTERNAL_PORTRAIT}"/>{collection}</Directory></MediaContainer>');return
         if path in ('/library/metadata/101','/library/metadata/201'):
-            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" parentRatingKey="{"100" if path.endswith("101") else "200"}" type="season" title="Season {1 if path.endswith("101") else 2}" thumb="/art/poster.jpg"/></MediaContainer>');return
+            self.respond(f'<MediaContainer><Directory ratingKey="{path.split("/")[-1]}" parentRatingKey="{"100" if path.endswith("101") else "200"}" type="season" title="Season {1 if path.endswith("101") else 2}" index="{1 if path.endswith("101") else 2}" leafCount="1" viewedLeafCount="{viewed(token,path.split("/")[-1],1,0)}" thumb="/art/poster.jpg"/></MediaContainer>');return
         if path=='/library/metadata/103':
             self.respond(f'<MediaContainer><Video ratingKey="103" parentRatingKey="201" grandparentRatingKey="200" {SHOW_FIELDS["103"]} type="episode" index="3" title="The return" duration="30000" thumb="/art/poster.jpg"><Media><Part id="1103" indexes="sd" key="/video/sample.mp4"/></Media><Role tag="Nadia Lane" role="Captain Mira (flashback)" thumb="/art/nadia.jpg"/></Video></MediaContainer>');return
         if path=='/library/metadata/102':

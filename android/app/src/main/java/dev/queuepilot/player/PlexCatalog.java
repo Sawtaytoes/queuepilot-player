@@ -367,7 +367,18 @@ final class PlexCatalog {
               current.getJSONObject("facts"),
               name.equals("Genre") ? "genres" : "countries",
               parser);
-        else if (current != null && name.equals("Media") && parser.getDepth() == itemDepth + 1) {
+        else if (current != null
+            && name.equals("Collection")
+            && parser.getDepth() == itemDepth + 1) {
+          // The collections a title belongs to, by name and tag id, for Go to collection.
+          JSONObject facts = current.getJSONObject("facts");
+          JSONArray collections = facts.optJSONArray("collections");
+          if (collections == null) facts.put("collections", collections = new JSONArray());
+          collections.put(
+              new JSONObject()
+                  .put("tag", attribute(parser, "tag"))
+                  .put("id", attribute(parser, "id")));
+        } else if (current != null && name.equals("Media") && parser.getDepth() == itemDepth + 1) {
           JSONObject facts = current.getJSONObject("facts");
           if (!facts.has("videoResolution"))
             facts
@@ -463,6 +474,10 @@ final class PlexCatalog {
     "childCount",
     "viewCount",
     "tagline",
+    // An extra's kind (/library/metadata/<key>/extras), and the library an item belongs to.
+    "extraType",
+    "subtype",
+    "librarySectionID",
   };
 
   private static JSONObject facts(XmlPullParser parser) throws Exception {

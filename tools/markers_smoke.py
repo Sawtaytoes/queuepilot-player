@@ -49,7 +49,8 @@ known=len(timelines());skip('Skip Credits','marker-skip-final-credits')
 wait_for(lambda:any(r['query'].get('state')==['stopped'] for r in timelines()[known:]),'stopped timeline')
 stopped=[r for r in timelines()[known:] if r['query'].get('state')==['stopped']][-1]['query']
 assert int(stopped['time'][0])>=0.9*int(stopped['duration'][0]),stopped
-s.back();s.contains('Watch with Ada')
+# A title that ends outside a queue returns to its title screen by itself.
+s.contains('Watch with Ada')
 
 # Queue playback: the same skips, and final credits complete the item and start the next one.
 s.post('_native_reset');s.click('Home');s.click('Watching');s.contains('2 queues');s.click('Movies & Shows · 2. Ada, Grace. Picks. Plays as Ada. Play queue')

@@ -65,7 +65,7 @@ blocks the browser remote. It then installs the checkout's APK, starts
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
 `rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `household_smoke.py`,
-`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `playback_smoke.py`, `conversion_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
+`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `title_smoke.py`, `playback_smoke.py`, `conversion_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
@@ -255,7 +255,8 @@ the beginning starting at 0; Plex's selected audio and subtitles, a changed audi
 subtitles Off saved for Ada with `allParts=1`, and both coming back from Plex on the next play;
 the frame-rate request in the `QueuePilotFrameRate` log, and its clearing when Match frame rate
 is turned off from the player's options; chapters opening below their top-bar control with every
-chapter image shown, and a chapter seek; the sidecar subtitle loaded with Ada's token; the account
+chapter image shown, and a chapter seek; the sidecar subtitle loaded with Ada's token, and the
+show's trailer played next never loading it; the account
 languages choosing the full English subtitles for Japanese audio; confirming the track that is
 already playing saving nothing; queues using the plan's `languages` when Plex selects nothing
 (Ada's queue shows the full English subtitles, Grace's only the forced signs, which is Grace's own
@@ -326,3 +327,18 @@ environment that people also use from a browser:
 it stops by itself after the idle period. To let a person try a branch build by hand, use
 `queuepilot-test install` inside the environment, described in its
 [README](../test-environment/README.md#branch-builds-for-people).
+
+`title_smoke.py` follows the library check. The fixture gives Glass City seven extras of six
+kinds, listed out of order, and puts it in two collections; Paper Moons has one featurette and
+plays the 30-second clip from its start; Orbit Nine has a trailer and one collection. The check
+covers: the extras rows in their fixed order with no empty Scenes or Shorts row; Play trailer
+beside Play, and Back to the same title with focus on it; an extra played to its end returning
+to the title with focus on that extra, with no `/:/timeline`, `/:/scrobble`, or queue event for
+any extra; Go to collection asking between two collections and opening the chosen one through
+`/library/collections/<key>/children`; Paper Moons played to its end returning to its title with
+focus on its featurette, after a stopped timeline; the show's single collection opening at once;
+Mark watched's panel text, Cancel sending nothing, and Watched and Unwatched sending `/:/scrobble`
+and `/:/unscrobble` for the show with Ada's token and updating the facts line; a season marked
+on its own; and an episode's Go to season (looked up from the episode's record, because the
+fixture's listing leaves the season key out) and Go to show. `markers_smoke.py` no longer presses
+Back after the final credits: the title returns to its title screen by itself.
