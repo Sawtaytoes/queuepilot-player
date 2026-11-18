@@ -18,9 +18,12 @@ case "$operation" in
     [[ "$checkout" == /* ]] || checkout=/source/.worktrees/$checkout
     if [[ "$checkout" == /source ]]; then name='main checkout'; else name=$(basename "$checkout"); fi
     label=${3:-"tv-lab checks ($name)"}
-    docker exec "$container" test -f "$checkout/android/app/build/outputs/apk/debug/app-debug.apk" \
-      || { echo "No debug APK in $checkout; build it first"; exit 1; }
-    in_environment run --source "$checkout" --label "$label" -- bash "$checkout/tools/tv-checks.sh"
+    # The checks run against the release APK that the TVs get, unless QUEUEPILOT_VARIANT=debug.
+    variant=${QUEUEPILOT_VARIANT:-release}
+    [[ "$variant" == release || "$variant" == debug ]] || { echo 'QUEUEPILOT_VARIANT is release or debug'; exit 2; }
+    apk="$checkout/android/app/build/outputs/apk/$variant/app-$variant.apk"
+    docker exec "$container" test -f "$apk" || { echo "No $variant APK in $checkout; build it first"; exit 1; }
+    in_environment run --source "$checkout" --apk "$apk" --label "$label ($variant)" -- bash "$checkout/tools/tv-checks.sh"
     ;;
   *) echo 'Usage: tv-lab.sh status | start | stop | test [<checkout or worktree name>] [<label>]'; exit 2 ;;
 esac

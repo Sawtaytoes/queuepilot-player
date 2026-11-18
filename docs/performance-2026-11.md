@@ -101,6 +101,25 @@ closeable, registration, or activity, and nothing while browsing the grid, openi
 playing. Finding 12 records the reads. The raw log is `/fixtures/perf-strictmode.txt` in the
 test environment.
 
+### Release build (pull request #27)
+
+The TVs ran debug builds through 0.5.9. A debuggable app is not compiled ahead of time from a
+profile, and R8 does not run on it. Pull request #27 makes the release build the one the TVs run,
+signed with the same key; the [decision record](decisions/2026-11-17-tvs-get-a-release-build-signed-with-the-key-of-their-debug-installs.md)
+has the details. One run of this probe on 2026-11-17, medians, first cold start dropped:
+
+| APK | Whole APK | Cold start | Hot start | Home, total PSS |
+| --- | --- | --- | --- | --- |
+| 0.5.9 debug, what the TVs run | 22.9 MB | 1,148 ms | 460 ms | 66.2 MB |
+| 0.5.9 built as release | 9.2 MB | 1,125 ms | 480 ms | 54.0 MB |
+| With Kotlin and Compose, debug | 40.7 MB | 1,268 ms | 411 ms | 95.1 MB |
+| With Kotlin and Compose, release | 9.3 MB | 903 ms | 180 ms | 53.4 MB |
+
+A single run varies by a few hundred milliseconds; an earlier run measured 1,506 ms and 1,090 ms
+cold for the two 0.5.9 builds. In both runs the release build started faster than its debug
+build. StrictMode runs only on a debuggable build, so the main-thread pass above was on a debug
+build.
+
 ### What the measurements do not show
 
 The emulator draws Home's frames in 116 to 135 ms with a UI thread under 1 ms: almost all of the

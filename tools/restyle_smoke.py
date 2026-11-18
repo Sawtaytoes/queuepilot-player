@@ -78,7 +78,7 @@ measure('Viewing distance, ','6.5','Distance · 6.5 ft')
 wait_text('Auto · 65%')
 assert texts().count('50%')+texts().count('125%')>=1,'The manual sizes run from 50% to 125%'
 press('Auto · 65%');wait_text('Display size · Auto · 65%')
-assert '<int name="display-size" value="0" />' in s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/state.xml').decode()
+state=s.app_file('shared_prefs/state.xml');assert state is None or '<int name="display-size" value="0" />' in state
 
 columns={}
 for mode,setting in (('auto','Display size · Auto · 65%'),('100','Display size · 100%')):

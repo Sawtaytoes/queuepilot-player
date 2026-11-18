@@ -49,7 +49,8 @@ with the base, token by token and in order, with each member reference resolved 
 declares it; its docstring lists what else it allows and what it cannot see. It does not replace
 the build, tests, and emulator checks. Code decisions are in `docs/decisions/`.
 
-Run Android lint, ktlint, unit tests, assembleDebug, and emulator smoke checks. Model tests must
+Run Android lint, ktlint, unit tests, the debug and release builds, and the emulator smoke
+checks, which test the release APK that TVs get. Model tests must
 prove restart/resume and profile isolation. Do not store generated APKs or build caches in
 Git. Register and merge verified PRs, run the workspace personal-detail scanner, and remove
 merged worktrees. Do not install or change an active TV merely to run tests; use the emulator.

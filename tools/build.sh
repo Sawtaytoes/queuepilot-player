@@ -14,4 +14,4 @@ docker run --rm --cpus 2 --memory 6g --name "queuepilot-player-build-$checkout_n
   -v "$source_directory:/source" \
   -v "$cache_directory:/cache" \
   -v "$cache_directory/android:/root/.android" \
-  queuepilot-player-build:0.1 bash -c 'bash /source/tools/native-build.sh && gradle --no-daemon --max-workers=2 testDebugUnitTest lintDebug ktlintCheck assembleDebug'
+  queuepilot-player-build:0.1 bash -c 'bash /source/tools/native-build.sh && gradle --no-daemon --max-workers=2 testDebugUnitTest lintDebug ktlintCheck assembleDebug assembleRelease'

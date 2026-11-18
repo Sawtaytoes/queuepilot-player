@@ -11,6 +11,9 @@ fixtures=${FIXTURE_ROOT:?Run this through queuepilot-test run}
 # restore did that.
 echo "Disabled packages before this run: $(adb -s emulator-5554 shell pm list packages -d | tr -d '\r' | tr '\n' ' ')"
 adb -s emulator-5554 shell pm disable-user --user 0 com.google.android.tvrecommendations
+# The launcher still shows its promotions with that package disabled, and this emulator image
+# lets neither the shell nor adbd as root disable the launcher's dialog activity
+# (docs/testing.md). smoke.screen() answers the launcher instead.
 python3 -u "$source_directory/tools/theme_check.py"
 bash "$source_directory/tools/ui-inspector/build.sh" "$fixtures/inspector-build"
 adb -s emulator-5554 install -r "$fixtures/inspector-build/inspector.apk"

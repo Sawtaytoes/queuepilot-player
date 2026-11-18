@@ -264,16 +264,23 @@ Build the Docker toolchain with `docker build -t queuepilot-player-build:0.1 too
 ./tools/build.sh /absolute/path/to/queuepilot-player /absolute/path/to/build-cache
 ```
 
-The build runs unit tests, Android lint, ktlint (Kotlin formatting), and `assembleDebug`. CI
-(`.forgejo/workflows/ci.yml`) runs the same four, without the native ASS library, plus
+The build runs unit tests, Android lint, ktlint (Kotlin formatting), and builds the debug and
+release APKs. CI (`.forgejo/workflows/ci.yml`) runs the same steps, without the native ASS library, plus
 `tools/theme_check.py` and `tools/size_check.py` on every pull request that changes more than
 documentation. `size_check.py` fails any source file over 400 lines unless
-`tools/size-exceptions.txt` lists it with a ceiling it may not pass. Preserve the cache's `android`
-directory so test updates retain their signing key. The APK is
-`android/app/build/outputs/apk/debug/app-debug.apk`.
+`tools/size-exceptions.txt` lists it with a ceiling it may not pass.
+
+TVs get the release APK, `android/app/build/outputs/apk/release/app-release.apk`. R8 shrinks it,
+and it is not debuggable, so Android compiles it ahead of time. It is signed with the key in the
+build cache's `android/debug.keystore`, which signed every debug build the TVs had, so it installs
+over one in place and keeps the sign-in and settings ([decision](docs/decisions/2026-11-17-tvs-get-a-release-build-signed-with-the-key-of-their-debug-installs.md)).
+Preserve and back up the cache's `android` directory: an APK signed with any other key cannot
+update the TVs. The debug APK, `android/app/build/outputs/apk/debug/app-debug.apk`, is for
+development. Before a TV gets a release APK, the emulator checks and `tools/upgrade_smoke.py`
+must pass against it.
 
 ```sh
-adb install -r android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r android/app/build/outputs/apk/release/app-release.apk
 adb shell am start -n dev.queuepilot.player.prototype/dev.queuepilot.player.MainActivity
 ```
 

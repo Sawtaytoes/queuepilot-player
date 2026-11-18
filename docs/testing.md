@@ -39,19 +39,28 @@ at most two Gradle workers. It uses no library media or photographs.
 The fixture server returns Plex-shaped XML, scoped invented tokens, byte-range video
 responses, and a QueuePilot-shaped registry. Its request history deliberately omits tokens.
 
-Run the emulator checks in QueuePilot Test, from the Docker host that runs it. Build the APK
+Run the emulator checks in QueuePilot Test, from the Docker host that runs it. Build the APKs
 in the checkout first:
 
 ```sh
 ./tools/tv-lab.sh test                      # the canonical checkout, mounted at /source
 ./tools/tv-lab.sh test my-branch            # the worktree /source/.worktrees/my-branch
+QUEUEPILOT_VARIANT=debug ./tools/tv-lab.sh test my-branch   # the debug APK instead
 ```
+
+The checks test the release APK, the one TVs get, unless `QUEUEPILOT_VARIANT=debug`. A release
+build is not debuggable, so `run-as` cannot read its files, and the lab's emulator image is a
+production build: it has no `su`, and it refuses `adb root`. So `smoke.app_file()` returns
+nothing for a release build, and the checks skip what they would read there: the saved Display
+size, the queue-people filter, and the encrypted tokens and progress outbox. Each skip prints a
+`SKIP:` line. What the screen shows is still checked. Run the debug APK too
+(`QUEUEPILOT_VARIANT=debug`) to check the files; R8 is the only difference between the two.
 
 `tools/tv-lab.sh test` calls `queuepilot-test run` with `tools/tv-checks.sh` from the same
 checkout. The environment takes its lock, so a second run waits instead of overlapping, and waiting
 runs start in the order they arrived. It
 saves an emulator snapshot of the person's session, shows the test banner on the page, and
-blocks the browser remote. It then installs the checkout's debug APK, starts
+blocks the browser remote. It then installs the checkout's APK, starts
 `tools/fixture_server.py` with `FIXTURE_ROOT`, and runs the checks: the emulator-only hierarchy
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
@@ -59,6 +68,19 @@ inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.p
 `cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `playback_smoke.py`, `conversion_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
+
+Before a release APK goes to a TV, `tools/upgrade_smoke.py` confirms that it installs over the
+debug build the TVs have and keeps the sign-in and settings. Build that debug APK from the
+commit the TVs run, in its own worktree, then run:
+
+```sh
+docker exec ix-queuepilot-test-queuepilot-test-1 queuepilot-test run \
+  --source /source/.worktrees/my-branch \
+  --apk /source/.worktrees/my-branch/android/app/build/outputs/apk/release/app-release.apk \
+  --label 'my-branch upgrade' -- python3 -u /source/.worktrees/my-branch/tools/upgrade_smoke.py \
+  /source/.worktrees/tv-build/android/app/build/outputs/apk/debug/app-debug.apk \
+  /source/.worktrees/my-branch/android/app/build/outputs/apk/release/app-release.apk
+```
 
 The guest reaches the container's fixture server through the emulator's standard
 `10.0.2.2` host alias. The source contains only that standard alias and invented data.
@@ -195,11 +217,13 @@ started. Observed so far:
 
 What the checks do about it:
 
-- `tools/tv-checks.sh` disables `com.google.android.tvrecommendations` for each run, as an attempt
-  to remove the cause. It is not yet known whether this prevents the promotions. The run's
-  snapshot restore returns the emulator to its state from before the run. The first line of each
-  run's output lists the packages disabled before the run, so a disable left over from an earlier
-  run shows there.
+- `tools/tv-checks.sh` disables `com.google.android.tvrecommendations` for each run. That alone
+  does not prevent the promotions: the suite run on 2026-11-17 at `a964b66` still showed both,
+  each time in `com.google.android.tvlauncher/.dialog.ShowDialogsActivity`. Disabling only that
+  activity does not work on the lab image: `pm disable` from the shell fails with "Shell cannot
+  change component state", and `adb root` fails with "adbd cannot run as root in production
+  builds" (run on 2026-11-17). The run's snapshot restore returns the emulator to its state from
+  before the run, and the first line of each run's output shows what was disabled before it.
 - `smoke.screen()` handles the launcher when it is in front: see the comment above
   `PROMOTION_BUTTONS` in `tools/smoke.py`. When it acts, it logs the focused window at that moment
   ("Launcher window: …") as a diagnostic sample. A sample names the focused window, not
@@ -214,7 +238,8 @@ list for the launcher has these activities: `.MainActivity`, `.appsview.AppsView
 `.notifications.NotificationsSidePanelActivity`, `.settings.HomeScreenSettingsActivity`, and
 `.settings.OpenSourceActivity`, with receivers and a provider. The recommendations package includes
 `.promos.config.ConfigurationProvider` and `.promos.server.LocaleChangeReceiver`. Which component
-shows the promotions is not yet known.
+shows the promotions was not known then; the suite run above named `.dialog.ShowDialogsActivity`,
+which `dumpsys package` had not listed.
 
 `playback_smoke.py` follows the library check, while the fixture QueuePilot is still connected,
 and before `layout_smoke.py` clears the app's data. The fixture's episode 102 can carry Plex

@@ -5,6 +5,17 @@ from pathlib import Path
 SERIAL='emulator-5554'
 PACKAGE='dev.queuepilot.player.prototype'
 def adb(*args):return subprocess.check_output(['adb','-s',SERIAL,*args],stderr=subprocess.STDOUT,timeout=30)
+def app_file(name):
+    """A file in the app's data directory, or None for a release build. run-as reads only a
+    debuggable build, and the lab's emulator image does not allow adb root. Checks of a release
+    build skip what they would read here and keep what they see on screen."""
+    try:return adb('shell','run-as',PACKAGE,'cat',name).decode()
+    except subprocess.CalledProcessError:
+        if is_debuggable():raise
+        print('SKIP: a release build does not let the checks read '+name,flush=True)
+        return None
+def is_debuggable():
+    return 'DEBUGGABLE' in adb('shell','dumpsys','package',PACKAGE).decode().split('pkgFlags=')[1].split('\n')[0]
 def dump():
     """The active window's UI hierarchy, from the emulator-only inspector."""
     hardware=adb('shell','getprop','ro.hardware').decode().strip()
@@ -180,7 +191,7 @@ def main():
     back();contains('Next: Orbit Nine · OVA');adb('shell','am','force-stop',PACKAGE);launch();contains('Next: Orbit Nine · OVA')
     click('Settings');click('Connect Plex');contains('ABCD');shot('plex-link')
     back();post('_claim');time.sleep(3);contains('Settings') # canceled authorization cannot save an account
-    assert not 'fixture-root' in adb('shell','run-as',PACKAGE,'cat','shared_prefs/state.xml').decode()
+    state=app_file('shared_prefs/state.xml');assert state is None or 'fixture-root' not in state
     post('_expire_next');click('Connect Plex');contains('This code has expired');click('New code');contains('ABCD');post('_claim')
     # No profile choice before Home: sign-in opens the account's own profile, because queues play
     # as the profile each queue names. The picker stays one press away on the rail avatar.
@@ -194,8 +205,8 @@ def main():
     click('Home');click('Switch profile, Ada');click('Grace');contains('What are we watching?');contains('Demo Cinema');click('Series');open_library('Series');contains('Orbit Nine')
     post('_cloud_offline');post('_offline');click('Home');click('Switch profile, Grace');click('Ada');contains('What are we watching?');click('Series');contains('Saved listing');open_library('Series');contains('Saved listing');contains('Orbit Nine');shot('cached-library')
     post('_online');click('Home');click('Switch profile, Ada');click('Morgan');enter_pin('2468');contains('What are we watching?');contains('Demo Cinema')
-    encrypted=adb('shell','run-as',PACKAGE,'cat','shared_prefs/secrets.xml').decode()
-    assert 'ciphertext' in encrypted and not any(s in encrypted for s in ('fixture-root','fixture-ada','fixture-grace','fixture-morgan'))
+    encrypted=app_file('shared_prefs/secrets.xml')
+    assert encrypted is None or 'ciphertext' in encrypted and not any(s in encrypted for s in ('fixture-root','fixture-ada','fixture-grace','fixture-morgan'))
     requests=json.load(urllib.request.urlopen('http://127.0.0.1:9010/_requests'))
     assert any(r['path']=='/video/sample.mp4' and r['profile']=='ada' for r in requests)
     assert any(r['profile']=='grace' for r in requests)

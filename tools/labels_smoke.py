@@ -28,7 +28,11 @@ if s.has_desc('Switch profile, Morgan'):s.click('Switch profile, Morgan');s.clic
 # shows and Clear is one press. Every queue is then listed in one group, in the server's order.
 # Nobody switches profile to use one: each card says whom it plays as, as information only.
 everything=json.load(urllib.request.urlopen('http://127.0.0.1:9010/api/native/queues?people='))['queues']
-people=s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/state.xml').decode()
+people=s.app_file('shared_prefs/state.xml')
+if people is None:  # a release build: a saved choice shows as the filter notice instead
+    time.sleep(2)
+    if any(t.startswith('Showing ') for t in texts()):s.click('Clear')
+    people=''
 selected=sorted(re.findall(r'<string>([a-z]+)</string>',people.split('name="queue-people"')[1].split('</set>')[0])) if 'name="queue-people"' in people else []
 if selected:
     shown=json.load(urllib.request.urlopen('http://127.0.0.1:9010/api/native/queues?people='+','.join(selected)))['queues']

@@ -43,7 +43,7 @@ jobs:
       # `owner/repo` against THIS host, so name the mirror.
       charcuterieRepository: sawtaytoes/charcuterie
 
-  # Unit tests, Android lint, ktlint, and assembleDebug (tools/ci-build.sh), plus
+  # Unit tests, Android lint, ktlint, and the debug and release APKs (tools/ci-build.sh), plus
   # the theme and file-size checks, which need no emulator.
   android:
     needs: [changes]
@@ -62,7 +62,7 @@ jobs:
           python3 tools/theme_check.py
       - name: File size check
         run: python3 tools/size_check.py
-      - name: Unit tests, lint, ktlint, and assembleDebug
+      - name: Unit tests, lint, ktlint, and the debug and release builds
         # The build container gets the same bounds as tools/build.sh. The
         # named volume keeps the SDK, Gradle, and its dependencies between runs.
         run: |

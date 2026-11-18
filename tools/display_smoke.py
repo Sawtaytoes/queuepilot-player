@@ -85,7 +85,14 @@ def focus_outline_visible(percent):
 
 s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Home');s.contains('What are we watching?')
 if s.has_desc('Switch profile, Morgan'):s.click('Switch profile, Morgan');s.click('Ada');s.contains('What are we watching?')
-if 'name="display-size"' in s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/state.xml').decode():
+state=s.app_file('shared_prefs/state.xml')
+if state is None:
+    # A release build hides its files, so the Settings row shows whether an earlier run, such as
+    # the native-density run before --density-320, left a size behind.
+    s.click('Settings')
+    row=wait(lambda:[n.get('text') for n in nodes() if n.get('text','').startswith('Display size · ')],'Display size')[0]
+    if row!='Display size · Auto · 95%':set_size(100)
+elif 'name="display-size"' in state:
     set_size(100) # an interrupted earlier run left a size behind
 else:
     # Auto is the default; 55 in at 9 ft computes 95%.
@@ -96,7 +103,8 @@ for percent in (100,70,125):
     set_size(percent)
     if percent!=100:
         # The choice is stored and survives a restart.
-        assert f'name="display-size" value="{percent}"' in s.adb('shell','run-as',s.PACKAGE,'cat','shared_prefs/state.xml').decode()
+        state=s.app_file('shared_prefs/state.xml')
+        assert state is None or f'name="display-size" value="{percent}"' in state
         s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Settings');wait(lambda:by_text(f'Display size · {percent}%'),'the stored Display size')
     s.click('Home');s.contains('What are we watching?');assert_text_fits();s.shot(f'display-size-{percent}-home-{label}')
     row=first_row();columns[percent]=len(row);assert_text_fits();focus_outline_visible(percent);s.shot(f'display-size-{percent}-films-{label}')
