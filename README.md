@@ -82,6 +82,41 @@ in the library it was. **Search** (on the rail, and in each library's header for
 alone) takes the on-screen keyboard, and voice when the device has a speech recognizer, and
 groups the results as Movies, Shows, and Episodes; a result opens its title screen.
 
+**Recently Added.** A movie or show library's own screen starts with a Recently Added row above
+its grid. A movie library lists its 20 newest movies (`all?type=1&sort=addedAt:desc`). A show
+library reads its 60 newest episodes (`all?type=4&sort=addedAt:desc`) and shows one card per
+show, newest first, with the count ("3 new episodes"); a card opens the show. The row is on the
+library's first screen only: not in a show, a season, a folder, a collection, or search. Its
+cards are spoken as "Recently added, …", so they are never confused with the grid's. A fresh visit
+starts with focus on the row's first card, with the screen at its top; Back from a title returns
+to the card it was opened from.
+
+**View as Folders.** The library's Sort panel also has **View as · Titles / Folders**, kept per
+library and profile like the sort. Folders lists the library through the media server's folder
+browsing (`/library/sections/<key>/folder`, and `?parent=<id>` for a folder inside it), with
+folders first as folder tiles and then the files. Back walks up one folder. Folders keeps the
+server's folder order, so its panel (**Options · Folders**) offers no sort and the grid has no
+letter bar. A server that ignores paging for a folder listing sends the whole folder at once,
+or the same first page again; either way the grid then stops asking for more.
+
+**All Movies and Shows** is the first card under both Series and Movies. It merges every movie
+and show library that it includes into one grid, and each title carries a small chip with its
+library's name in that library's own color (Charcuterie's categorical hues, without Lime, which
+is the focus color; a library keeps its color by its place in the server's library order). A
+library's Sort panel has **In All Movies and Shows · Included / Not included**. A library is
+included by default, except one viewed as Folders, which stays out until it is included by hand,
+so demo content stays separate without any library name in the app. A choice equal to the
+view's default is not stored, so the default keeps following the view. The media server has no
+listing across libraries, so the TV reads each included library in pages of 500 titles, merges
+them, and keeps them for five minutes; a grid keeps the read it started with until it is opened
+again, so its pages and letters always agree. All five sorts, the # A–Z letter bar, the count line, and
+infinite scroll work in the merged grid, sorted on the TV: title order ignores a leading "The",
+"A", or "An", accents and case, and uses Plex's `titleSort` when it differs; missing dates or
+ratings sort last. Its Search searches each included library (`/hubs/search` with each
+`sectionId`) and merges the results once each. Not available in the merged grid: an offline
+saved copy (it needs the server), and a sort order identical to the server's in every language;
+the server's own title order can differ for articles of other languages.
+
 **Add to queue** on a title screen, and on a show's season list, lists every Picks queue, each
 with its audience ("Ada, Grace"); a locked queue carries a lock and asks for the TV PIN. The
 title goes to the top of the chosen queue, and a title already in it is reported, not repeated.
@@ -327,7 +362,7 @@ ADB is only a deployment/testing tool. The app performs its own authentication a
 The disposable emulator fixture checks code authorization, cancellation, expiry, profile PINs,
 discovery, encrypted storage, media playback, and remote navigation. It uses invented data,
 refuses physical-device targets, and accepts fixture routing only on an emulator.
-See [test environment](docs/testing.md) and [verification](docs/verification-0.6.2.md).
+See [test environment](docs/testing.md) and [verification](docs/verification-0.6.3.md).
 `tools/perf_probe.py` measures start time, frames, memory, and main-thread work in the
 emulator; see [performance](docs/performance-2026-11.md).
 The emulator checks run in the shared, browser-reachable [QueuePilot Test environment](test-environment/README.md)

@@ -116,7 +116,8 @@ for label,param in (('Recently added','addedAt:desc'),('Release date','originall
     s.click(label);wait_text(f'{TOTAL} titles · Sorted by {label}')
     expected=archive(param);wait_desc(expected[0]);assert first_poster(expected)==expected[0],(label,first_poster(expected),expected[0])
     assert not any(d.startswith('Jump to ') for d in descs()),'The letter bar is for title order only'
-    assert any(r['query'].get('sort')==[param] for r in requests('/library/sections/3/all')),param
+    # The grid's own request: Recently Added also sorts by addedAt, but names a type.
+    assert any(r['query'].get('sort')==[param] and 'type' not in r['query'] for r in requests('/library/sections/3/all')),param
     if label=='Recently added':
         s.shot('library-recently-added')
         s.adb('shell','am','force-stop',s.PACKAGE);s.launch();s.click('Home');open_archive()

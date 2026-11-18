@@ -58,4 +58,10 @@ interface ScreenHost {
 
   /** True, once, when the screen on show was reopened because its title ended. */
   boolean takeExtrasFocus();
+
+  /** A library poster card that opens its title, as the grids draw them. */
+  View poster(PlexCatalog.Entry entry);
+
+  /** The width of a poster card in dp at the current Display size. */
+  int posterWidth();
 }

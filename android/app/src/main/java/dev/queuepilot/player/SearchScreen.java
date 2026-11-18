@@ -164,7 +164,10 @@ final class SearchScreen {
       return;
     }
     host.status.setText("Searching for “" + trimmed + "”…");
-    String origin = host.server(), secret = host.token();
+    String origin = host.server(), secret = host.token(), id = host.activeId;
+    java.util.function.Predicate<String> included = host.includedLibraries();
+    // All Movies and Shows searches each included library and merges the results.
+    boolean isAll = section.equals(AllLibraries.SEARCH_SECTION);
     String path =
         "/hubs/search?query="
             + PlexAccount.encode(trimmed)
@@ -174,8 +177,16 @@ final class SearchScreen {
         () -> {
           try {
             JSONArray found =
-                PlexCatalog.hubs(
-                    PlexCatalog.get(PlexCatalog.url(origin, path), secret, 16 * 1024 * 1024));
+                isAll
+                    ? host.allLibraries.search(
+                        origin,
+                        secret,
+                        id,
+                        trimmed,
+                        included,
+                        () -> request == host.generation && sequence == searchSequence)
+                    : PlexCatalog.hubs(
+                        PlexCatalog.get(PlexCatalog.url(origin, path), secret, 16 * 1024 * 1024));
             host.runOnUiThread(
                 () -> {
                   if (request != host.generation || sequence != searchSequence) return;

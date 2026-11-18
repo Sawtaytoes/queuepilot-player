@@ -286,6 +286,10 @@ final class PlexCatalog {
             key = directoryKey;
             if (!directoryKey.startsWith("/")) type = "library";
           }
+          // A folder of a library's folder view: /library/sections/<key>/folder?parent=<id>.
+          boolean isFolder =
+              name.equals("Directory") && type.isEmpty() && LibraryOptions.isFolderPath(directoryKey);
+          if (isFolder) type = "folder";
           if (type.isEmpty()) type = "library";
           String children =
               type.equals("library")
@@ -294,7 +298,7 @@ final class PlexCatalog {
                       ? directoryKey
                       : "/library/metadata/" + key + "/children";
           if (name.equals("Directory") && !type.equals("library"))
-            children = "/library/metadata/" + key + "/children";
+            children = isFolder ? directoryKey : "/library/metadata/" + key + "/children";
           current =
               new JSONObject()
                   .put("key", key)
@@ -479,6 +483,10 @@ final class PlexCatalog {
     "extraType",
     "subtype",
     "librarySectionID",
+    // What All Movies and Shows sorts by, beside the facts above.
+    "titleSort",
+    "addedAt",
+    "lastViewedAt",
   };
 
   private static JSONObject facts(XmlPullParser parser) throws Exception {

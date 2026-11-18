@@ -115,9 +115,9 @@ def title_sort(title):return title[4:] if title.startswith('The ') else title
 def first_character(title):
     c=title_sort(title)[:1].upper()
     return c if c.isalpha() else '#'
-SORTS={'titleSort':lambda f:(title_sort(f['title']).casefold(),False),'addedAt:desc':lambda f:(f['addedAt'],True),
-    'originallyAvailableAt:desc':lambda f:(f['originallyAvailableAt'],True),'audienceRating:desc':lambda f:(float(f['audienceRating']),True),
-    'lastViewedAt:desc':lambda f:(f['lastViewedAt'] or 0,True)}
+SORTS={'titleSort':lambda f:(title_sort(f['title']).casefold(),False),'addedAt:desc':lambda f:(f.get('addedAt') or 0,True),
+    'originallyAvailableAt:desc':lambda f:(f.get('originallyAvailableAt') or '',True),'audienceRating:desc':lambda f:(float(f.get('audienceRating') or 0),True),
+    'lastViewedAt:desc':lambda f:(f.get('lastViewedAt') or 0,True)}
 def sorted_items(items,sort):
     if not sort:return items
     key=SORTS[sort];reverse=key(items[0])[1] if items else False
@@ -128,9 +128,21 @@ def film_xml(f):
     return f'<Video ratingKey="{f["key"]}" type="movie" title={quoteattr(f["title"])} summary={quoteattr(f.get("summary","An invented film for the browsing fixture."))} year="2024" thumb="/art/poster.jpg"{extra}/>'
 SECTION_SHOWS=[{'key':'100','title':'Orbit Nine'},{'key':'200','title':'Harbor Lights'}]
 def show_xml(f):return f'<Directory ratingKey="{f["key"]}" key="/library/metadata/{f["key"]}/children" type="show" title="{f["title"]}" thumb="/art/poster.jpg"/>'
+# Demos (section 4): a few test clips, organized in folders. Its folder view has nested folders.
+DEMOS=[{'key':'4001','title':'Bass Sweep','addedAt':1690000000},{'key':'4002','title':'Channel Check','addedAt':1690000100},
+    {'key':'4003','title':'Color Bars','addedAt':1690000200},{'key':'4004','title':'Motion Test','addedAt':1690000300}]
+def demo(key):return next(f for f in DEMOS if f['key']==key)
+def folder_xml(parent,title):return f'<Directory key="/library/sections/4/folder?parent={parent}" title="{title}"/>'
+FOLDERS={'':[folder_xml(41,'Audio'),folder_xml(42,'Video')],'41':[folder_xml(43,'Surround'),film_xml(demo('4001'))],
+    '43':[film_xml(demo('4002'))],'42':[film_xml(demo('4003')),film_xml(demo('4004'))]}
+# Newly added episodes, newest first: three of Orbit Nine and one of Harbor Lights.
+NEW_EPISODES=[('106','Orbit Nine','100','12',1760000300),('105','Orbit Nine','100','11',1760000200),('103','Harbor Lights','200','3',1760000150),('104','Orbit Nine','100','10',1760000100)]
+def new_episodes_xml():
+    return '<MediaContainer>'+''.join(f'<Video ratingKey="{k}" grandparentRatingKey="{show}" grandparentTitle="{title}" grandparentThumb="/art/poster.jpg" type="episode" index="{i}" parentIndex="1" title="Episode {i}" addedAt="{added}" thumb="/art/poster.jpg"/>' for k,title,show,i,added in NEW_EPISODES)+'</MediaContainer>'
 def section_items(section):
     if section=='1':return SECTION_SHOWS,show_xml
-    if section=='2':return [{'key':str(k),'title':t,'summary':d} for k,t,d in FILMS],film_xml
+    if section=='2':return [{'key':str(k),'title':t,'summary':d,'addedAt':1700000000+k*1000} for k,t,d in FILMS],film_xml
+    if section=='4':return DEMOS,film_xml
     return ARCHIVE,film_xml
 def section_page(section,query):
     """A section listing honoring sort, X-Plex-Container-Start and -Size, with totalSize."""
@@ -146,8 +158,8 @@ def first_characters(section):
 EPISODES=[('102','The signal','100',SHOW_FIELDS['102'],'9'),('103','The return','200',SHOW_FIELDS['103'],'3')]
 def search_hubs(query,section):
     """Plex's /hubs/search: the matching titles grouped into Movie, Show and Episode hubs."""
-    q=query.casefold();sections=[section] if section else ['1','2','3']
-    movies=[f for s in sections if s in ('2','3') for f in section_items(s)[0] if q in f['title'].casefold()]
+    q=query.casefold();sections=[section] if section else ['1','2','3','4']
+    movies=[f for s in sections if s in ('2','3','4') for f in section_items(s)[0] if q in f['title'].casefold()]
     shows=[f for f in SECTION_SHOWS if '1' in sections and q in f['title'].casefold()]
     episodes=[e for e in EPISODES if '1' in sections and q in e[1].casefold()]
     hubs=''
@@ -431,13 +443,20 @@ class Handler(BaseHTTPRequestHandler):
         if path=='/library/onDeck':
             self.respond(f'<MediaContainer><Video ratingKey="102" type="episode" index="9" title="The signal" thumb="/art/poster.jpg" {SHOW_FIELDS["102"]}/><Video ratingKey="103" type="episode" index="3" title="The return" thumb="/art/poster.jpg" {SHOW_FIELDS["103"]}/></MediaContainer>');return
         if path=='/library/sections':
-            self.respond('<MediaContainer><Directory key="1" type="show" title="Series"/><Directory key="2" type="movie" title="Films"/><Directory key="3" type="movie" title="Archive"/></MediaContainer>');return
+            self.respond('<MediaContainer><Directory key="1" type="show" title="Series"/><Directory key="2" type="movie" title="Films"/><Directory key="3" type="movie" title="Archive"/><Directory key="4" type="movie" title="Demos"/></MediaContainer>');return
         query=parse_qs(parsed.query)
         if path=='/library/sections/2/all' and not query:
             self.respond(films());return
-        if path in ('/library/sections/1/all','/library/sections/2/all','/library/sections/3/all'):
+        if path=='/library/sections/1/all' and query.get('type')==['4']:
+            self.respond(new_episodes_xml());return
+        if path in ('/library/sections/1/all','/library/sections/2/all','/library/sections/3/all','/library/sections/4/all'):
             self.respond(section_page(path.split('/')[3],query));return
-        if path in ('/library/sections/1/firstCharacter','/library/sections/2/firstCharacter','/library/sections/3/firstCharacter'):
+        if path=='/library/sections/4/folder':
+            # Like the server, a folder listing ignores paging and is in name order.
+            found=FOLDERS.get(query.get('parent',[''])[0])
+            if found is None:self.respond('missing',code=404);return
+            self.respond('<MediaContainer>'+''.join(found)+'</MediaContainer>');return
+        if path in ('/library/sections/1/firstCharacter','/library/sections/2/firstCharacter','/library/sections/3/firstCharacter','/library/sections/4/firstCharacter'):
             self.respond(first_characters(path.split('/')[3]));return
         if path=='/hubs/search':
             self.respond(search_hubs(query.get('query',[''])[0],query.get('sectionId',[''])[0]));return

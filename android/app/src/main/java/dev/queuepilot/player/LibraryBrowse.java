@@ -56,6 +56,17 @@ final class LibraryBrowse {
   }
 
   /** One page of a listing; {@code sortParam} empty keeps the server's own order. */
+  /**
+   * True when a later page starts with the listing's first item: the server ignored paging and
+   * sent the listing from its start again, so nothing after it is new.
+   */
+  static boolean isRepeat(org.json.JSONObject first, org.json.JSONArray page) {
+    if (first == null || page == null || page.length() == 0) return false;
+    org.json.JSONObject head = page.optJSONObject(0);
+    String key = first.optString("key");
+    return head != null && !key.isEmpty() && key.equals(head.optString("key"));
+  }
+
   static String pagePath(String path, String sortParam, int start, int size) {
     StringBuilder b = new StringBuilder(path).append(path.contains("?") ? '&' : '?');
     if (!sortParam.isEmpty()) b.append("sort=").append(sortParam).append('&');

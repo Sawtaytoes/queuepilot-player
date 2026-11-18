@@ -133,6 +133,8 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           String key = focusMemory.getOrDefault(current, "");
           return key.isEmpty() ? null : rememberedFocus(getWindow().getDecorView(), key);
         }
+        public View poster(PlexCatalog.Entry entry) { return MainActivity.this.poster(entry, -1); }
+        public int posterWidth() { return itemWidth(columns(5)); }
         public boolean takeExtrasFocus() {
           boolean isEnded = extrasFocus != null && extrasFocus == current;
           if (isEnded) extrasFocus = null;
@@ -141,6 +143,32 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       };
 
   final TitleNavigation titleNavigation = new TitleNavigation(screenHost);
+  /** All Movies and Shows: every included library's titles, read and merged off the main thread. */
+  final AllLibrariesSource allLibraries = new AllLibrariesSource(System::currentTimeMillis);
+
+  /** The open All Movies and Shows screen's read session ({@link AllLibrariesSource#open}). */
+  private long allSession;
+
+  /** Each library's kind ("movie", "show", …) by key, as the library list last gave it. */
+  private final Map<String, String> sectionTypes = new HashMap<>();
+
+  private LibraryOptionsPanel.Keys libraryKeys(String section) {
+    String server = profile.optString("serverId");
+    return new LibraryOptionsPanel.Keys(
+        sortPreference(section),
+        LibraryOptions.viewKey(activeId, server, section),
+        LibraryOptions.includeKey(activeId, server, section));
+  }
+
+  /** Whether All Movies and Shows includes a library, for the profile on show. Any thread. */
+  java.util.function.Predicate<String> includedLibraries() {
+    SharedPreferences stored = prefs();
+    String id = activeId, server = profile == null ? "" : profile.optString("serverId");
+    return section ->
+        LibraryOptions.isIncluded(
+            stored.getString(LibraryOptions.includeKey(id, server, section), ""),
+            stored.getString(LibraryOptions.viewKey(id, server, section), ""));
+  }
   long sectionFloor, sectionEnd = -1;
   boolean advancing;
   final Set<TvPanel> panels = new HashSet<>();
@@ -287,7 +315,9 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     extrasFocus = null;
     if (current != null) {
       View focused = getWindow().getDecorView().findFocus();
-      if (focused != null) focusMemory.put(current, focusKey(focused));
+      // Leaving through the rail says nothing about the screen's own place: it starts fresh.
+      if (focused != null && !isInRail(focused)) focusMemory.put(current, focusKey(focused));
+      else if (focused != null) focusMemory.remove(current);
       history.push(current);
     }
     render(screen);
@@ -605,8 +635,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     view.post(
         () -> {
           if (!view.isAttachedToWindow()) return;
+          // A library's Recently Added row may already hold the screen's first focus.
+          if (RecentlyAddedRow.holds(getCurrentFocus())) return;
           String key = focusMemory.getOrDefault(current, "");
           View target = key.isEmpty() ? null : rememberedFocus(getWindow().getDecorView(), key);
+          if (target != null && isInRail(target)) target = null;
           (target == null ? view : target).requestFocus();
         });
   }
@@ -713,12 +746,16 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     String path = "", sortParam = "", sectionKey = "";
     LibraryBrowse.Sort sort;
     int columns, pageSize, start, end, total = -1;
-    boolean isComplete, isLoadingLater, isLoadingEarlier, isCached;
+    boolean isComplete, isLoadingLater, isLoadingEarlier, isCached, isFolders;
     LinearLayout rows;
     final Map<Integer, View> cards = new HashMap<>();
     List<LibraryBrowse.Letter> letters = List.of();
     final Map<String, TextView> letterViews = new HashMap<>();
     String shownLetter = "";
+    /** The first item read, to notice a server that ignores paging and sends it again. */
+    JSONObject first;
+    /** The card the grid offers focus to first, before the viewer moves. */
+    View firstFocus;
   }
 
   Grid grid;
@@ -733,8 +770,15 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       return;
     }
     shell(title.equals("Series") ? "Series" : title.equals("Movies") ? "Movies" : "");
-    String section = LibraryBrowse.sectionKey(path);
-    if (!section.isEmpty()) {
+    boolean isAll = AllLibraries.isPath(path);
+    if (isAll) allSession = allLibraries.open();
+    String section = isAll ? AllLibraries.SEARCH_SECTION : LibraryBrowse.sectionKey(path);
+    // A library viewed as Folders lists its folders from the top, with no sort or letter bar.
+    boolean isFolders =
+        !isAll
+            && !section.isEmpty()
+            && LibraryOptions.isFolders(prefs().getString(libraryKeys(section).view(), ""));
+    if (!section.isEmpty() && !isFolders) {
       // The letter bar sits along the right edge, so the grid leaves it room.
       mainWidth -= LETTER_BAR;
       content.setPadding(
@@ -758,14 +802,30 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
       titleScreen.loadParentHeader(parent.group(1), header);
     }
     Grid g = new Grid();
-    g.path = path;
+    g.path = isFolders ? LibraryOptions.folderRoot(section) : path;
     g.sectionKey = section;
     g.columns = columns(5);
     g.pageSize = LibraryBrowse.pageSize(g.columns);
     if (!section.isEmpty()) {
-      g.sort = LibraryBrowse.sort(prefs().getString(sortPreference(section), ""));
-      g.sortParam = g.sort.param();
+      g.isFolders = isFolders;
+      if (!isFolders) {
+        g.sort = LibraryBrowse.sort(prefs().getString(sortPreference(section), ""));
+        g.sortParam = g.sort.param();
+      }
       libraryTools(g, title);
+    }
+    if (!section.isEmpty() && !isAll) {
+      // Recently Added, on the library's first screen only, above the grid.
+      LinearLayout recent = ui.column();
+      content.addView(recent);
+      boolean isFresh = focusMemory.getOrDefault(current, "").isEmpty();
+      new RecentlyAddedRow(screenHost)
+          .load(
+              section,
+              sectionTypes.getOrDefault(section, ""),
+              recent,
+              isFresh,
+              () -> g.firstFocus);
     }
     g.rows = ui.column();
     content.addView(g.rows);
@@ -780,11 +840,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout tools = ui.row();
     TextView sort =
         ui.button(
-            "Sort · " + g.sort.label(),
-            R.drawable.lucide_arrow_up_down,
+            LibraryOptionsPanel.buttonLabel(g.isFolders, g.sort),
+            g.isFolders ? R.drawable.lucide_folder : R.drawable.lucide_arrow_up_down,
             () -> sortPanel(g, title),
             false);
-    sort.setContentDescription("Sort, " + g.sort.label());
+    sort.setContentDescription(g.isFolders ? "Options, Folders" : "Sort, " + g.sort.label());
     tools.addView(sort);
     TextView find =
         ui.button(
@@ -800,34 +860,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     ui.gap(content, 22);
   }
 
-  private static final int[] SORT_ICONS = {
-    R.drawable.lucide_arrow_down_a_z,
-    R.drawable.lucide_calendar_plus,
-    R.drawable.lucide_calendar,
-    R.drawable.lucide_star,
-    R.drawable.lucide_history,
-  };
-
-  /** The section's sorts in a side panel; the choice is kept for this section and profile. */
+  /** The library's sorts and options in a side panel, kept for this library and profile. */
   private void sortPanel(Grid g, String title) {
-    String[] labels = new String[LibraryBrowse.SORTS.size()];
-    for (int i = 0; i < labels.length; i++) labels[i] = LibraryBrowse.SORTS.get(i).label();
-    TvPanel dialog =
-        panel()
-            .setTitle("Sort " + title)
-            .setSelected(LibraryBrowse.indexOf(g.sort))
-            .setItemIcons(SORT_ICONS)
-            .setItems(
-                labels,
-                (d, i) -> {
-                  LibraryBrowse.Sort chosen = LibraryBrowse.SORTS.get(i);
-                  prefs().edit().putString(sortPreference(g.sectionKey), chosen.id()).apply();
-                  // The same screen in a new order, starting at its first title.
-                  render(new Screen("library", g.path, title, null, 0));
-                })
-            .create();
-    dialog.show();
-    dialog.setPanelSize(dp(360), -2);
+    String path = current.path();
+    LibraryOptionsPanel.show(
+        screenHost,
+        prefs(),
+        libraryKeys(g.sectionKey),
+        title,
+        AllLibraries.isPath(path),
+        g.sort,
+        // The same screen, in its new order or view, starting at its first title.
+        () -> render(new Screen("library", path, title, null, 0)));
   }
 
   /** The library list behind Series or Movies: a few libraries, never paged. */
@@ -835,6 +879,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     fetch(
         path,
         (entries, cached) -> {
+          for (int i = 0; i < entries.length(); i++)
+            sectionTypes.put(
+                entries.optJSONObject(i).optString("key"),
+                entries.optJSONObject(i).optString("libraryType"));
           if (Set.of("Series", "Movies").contains(title)) {
             JSONArray matching = new JSONArray();
             String type = title.equals("Series") ? "show" : "movie";
@@ -851,6 +899,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             status.setText("No libraries found on this server.");
             return;
           }
+          entries = withAllLibraries(entries);
           LinearLayout row = null;
           View first = null;
           int columns = columns(5);
@@ -873,6 +922,23 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         });
   }
 
+  /** The library list with All Movies and Shows first. */
+  private static JSONArray withAllLibraries(JSONArray entries) {
+    JSONArray withAll = new JSONArray();
+    try {
+      withAll.put(
+          new JSONObject()
+              .put("key", AllLibraries.SEARCH_SECTION)
+              .put("title", AllLibraries.TITLE)
+              .put("type", "library")
+              .put("children", AllLibraries.PATH));
+    } catch (Exception impossible) {
+      return entries;
+    }
+    for (int i = 0; i < entries.length(); i++) withAll.put(entries.opt(i));
+    return withAll;
+  }
+
   /** One page of a paged listing, with the listing's total; the last copy when offline. */
   private interface Page {
     void ready(JSONArray entries, int total, boolean cached);
@@ -880,12 +946,26 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
 
   private void fetchPage(String path, Page callback, Runnable failure) {
     int request = generation;
+    long session = allSession;
     String origin = server(), secret = token(), id = activeId;
+    java.util.function.Predicate<String> included = includedLibraries();
     network.execute(
         () -> {
           JSONObject page;
           boolean cached = false;
           try {
+            if (AllLibraries.isPath(path)) {
+              // Merged from every included library; there is no saved copy of it offline.
+              page = allLibraries.page(origin, secret, id, path, session, included, () -> request == generation);
+              JSONObject merged = page;
+              runOnUiThread(
+                  () -> {
+                    if (request == generation && id.equals(activeId))
+                      callback.ready(
+                          merged.optJSONArray("entries"), merged.optInt("total", -1), false);
+                  });
+              return;
+            }
             byte[] xml = PlexCatalog.get(PlexCatalog.url(origin, path), secret, 16 * 1024 * 1024);
             page =
                 new JSONObject()
@@ -957,9 +1037,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
             loadLater(g, -1);
             return;
           }
+          if (!isFirst && LibraryBrowse.isRepeat(g.first, entries)) {
+            // The server ignored paging and sent the listing again: it is complete.
+            g.isComplete = true;
+            gridStatus(g);
+            return;
+          }
+          if (isFirst) g.first = entries.optJSONObject(0);
           appendRows(g, entries, from, false);
           g.end = from + count;
-          g.isComplete = count < g.pageSize || (g.total >= 0 && g.end >= g.total);
+          // More than a page means the server ignored paging and sent the whole listing.
+          g.isComplete =
+              count < g.pageSize || count > g.pageSize || (g.total >= 0 && g.end >= g.total);
           gridStatus(g);
           if (!isFirst) return;
           if (count == 0) {
@@ -969,7 +1058,10 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
           View target = focusIndex >= 0 ? g.cards.get(focusIndex) : null;
           // A jump is chosen on the bar, so its title takes focus even after a touch.
           if (target != null) target.requestFocusFromTouch();
-          else focusFirst(g.cards.get(from));
+          else {
+            g.firstFocus = g.cards.get(from);
+            focusFirst(g.firstFocus);
+          }
         },
         () -> {
           if (g != grid) return;
@@ -1055,15 +1147,21 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
   private void loadLetters(Grid g) {
     int request = generation;
     String origin = server(), secret = token(), path = "/library/sections/" + g.sectionKey;
+    String id = activeId;
+    java.util.function.Predicate<String> included = includedLibraries();
+    boolean isAll = AllLibraries.isPath(g.path);
+    long session = allSession;
     network.execute(
         () -> {
           try {
             List<LibraryBrowse.Letter> letters =
-                PlexCatalog.letters(
-                    PlexCatalog.get(
-                        PlexCatalog.url(origin, path + "/firstCharacter"),
-                        secret,
-                        1024 * 1024));
+                isAll
+                    ? allLibraries.letters(origin, secret, id, session, included, () -> request == generation)
+                    : PlexCatalog.letters(
+                        PlexCatalog.get(
+                            PlexCatalog.url(origin, path + "/firstCharacter"),
+                            secret,
+                            1024 * 1024));
             runOnUiThread(
                 () -> {
                   if (request == generation && g == grid && !letters.isEmpty())
@@ -1155,10 +1253,18 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     LinearLayout card = ui.column();
     card.setPadding(dp(3), dp(3), dp(3), dp(10));
     int width = itemWidth(columns(5));
-    if (entry.type().equals("library")) {
+    if (entry.type().equals("library") || entry.type().equals("folder")) {
       FrameLayout tile = new FrameLayout(this);
       tile.setBackgroundColor(TvUi.PANEL);
-      ImageView icon = ui.icon(R.drawable.lucide_library_big, TvUi.ACCENT, 48);
+      ImageView icon =
+          ui.icon(
+              entry.type().equals("folder")
+                  ? R.drawable.lucide_folder
+                  : AllLibraries.isPath(entry.children())
+                      ? R.drawable.lucide_layers
+                      : R.drawable.lucide_library_big,
+              TvUi.ACCENT,
+              48);
       tile.addView(icon, new FrameLayout.LayoutParams(dp(48), dp(48), Gravity.CENTER));
       card.addView(tile, new LinearLayout.LayoutParams(-1, dp(150)));
     } else {
@@ -1178,6 +1284,11 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
     detail.setMaxLines(2);
     detail.setEllipsize(TextUtils.TruncateAt.END);
     card.addView(detail);
+    TextView chip = LibraryChip.view(this, ui, entry.facts());
+    if (chip != null) {
+      ui.gap(card, 6);
+      card.addView(chip, new LinearLayout.LayoutParams(-2, -2));
+    }
     ui.focusable(
         card,
         () -> {
@@ -1189,7 +1300,7 @@ public final class MainActivity extends androidx.activity.ComponentActivity {
         },
         TvUi.BG,
         0);
-    card.setContentDescription(entry.spoken());
+    card.setContentDescription(LibraryChip.spoken(entry.spoken(), entry.facts()));
     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(width), -2);
     lp.rightMargin = dp(14);
     card.setLayoutParams(lp);

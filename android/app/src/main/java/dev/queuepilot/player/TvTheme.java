@@ -112,6 +112,28 @@ final class TvTheme {
   /** {@code surface.raised} at 53%: a pressed Media3 control. */
   static final int CONTROL_PRESSED = 0x881d2430;
 
+  /**
+   * Library chips in All Movies and Shows: Charcuterie's categorical hues 1, 2, 3, 5, 6, 7, 8, 9
+   * and 10 in the daylight dark scheme (Red, Orange, Amber, Green, Teal, Blue, Indigo, Purple,
+   * Pink). Lime, hue 4, is left out: it is the accent and the focus ring. Index i of each array is
+   * one hue: {@code categorical.<n>.content} for the text, {@code .surface} for the fill, {@code
+   * .border} for the edge.
+   */
+  static final int[] CHIP_CONTENT = {
+    0xffffa5a2, 0xffffaa69, 0xffdfbd45, 0xff57d8a1, 0xff00d5e2, 0xff7bc8ff, 0xffb0bbff,
+    0xffdea9ff, 0xffff9fd2
+  };
+
+  static final int[] CHIP_SURFACE = {
+    0xff381c1b, 0xff361f0e, 0xff2d2508, 0xff0d2c1e, 0xff002b2f, 0xff0e2839, 0xff20233b,
+    0xff2d1f35, 0xff351c29
+  };
+
+  static final int[] CHIP_BORDER = {
+    0xffac5857, 0xffa3612a, 0xff876e06, 0xff168058, 0xff007d85, 0xff2577a9, 0xff626bb2,
+    0xff8960a2, 0xffa25881
+  };
+
   /** Video letterboxing: black, not a theme surface, so bars never tint the picture. */
   static final int VIDEO_BACKDROP = 0xff000000;
 

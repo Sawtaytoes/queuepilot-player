@@ -22,11 +22,15 @@ def wait(check,what,tries=40,pause=.5):
         found=check()
         if found:return found
         time.sleep(pause)
-    raise AssertionError('Timed out waiting for '+what+'\n'+s.text())
+    raise AssertionError('Timed out waiting for '+what+'\n'+'\n'.join(n.get('content-desc') or n.get('text','') for n in s.screen().iter('node') if n.get('content-desc') or n.get('text')))
 def focus_is(check,what,tries=40):
     return wait(lambda:(lambda n:n is not None and check(n.get('content-desc') or n.get('text') or ''))(focused()),'focus on '+what,tries)
 # A button's label is its text; a card's is its content description.
 def shown(label):return any(label in (n.get('content-desc',''),n.get('text','')) for n in nodes())
+def settle():
+    """A library's Recently Added row arrives above its grid; wait for it before a tap, so the
+    grid has stopped moving."""
+    wait(lambda:any((n.get('content-desc') or '').startswith('Recently added, ') for n in nodes()),'the Recently Added row')
 def on_player():return any(n.get('resource-id','').endswith(':id/exo_play_pause') for n in nodes())
 
 assert s.adb('shell','getprop','ro.hardware').decode().strip() in ('ranchu','goldfish')
@@ -37,7 +41,7 @@ if shown('Switch profile, Morgan'):s.click('Switch profile, Morgan');s.click('Ad
 events=len(get('_native_events'))
 
 # 1. Extras in one row per kind, in a fixed order, with Play trailer beside Play.
-s.click('Movies');s.open_library('Films');s.click('Glass City');s.contains('Watch with Ada')
+s.click('Movies');s.open_library('Films');settle();s.click('Glass City');s.contains('Watch with Ada')
 wait(lambda:shown('Play trailer'),'Play trailer')
 seen=[]
 for _ in range(14):
@@ -102,19 +106,20 @@ def play_to_end(title):
     focus_is(lambda d:d.startswith('Go to collection'),'Go to collection')
     s.click('Play');wait(on_player,'the player')
     wait(lambda:'Watch with Ada' in s.text(),'the title screen after '+title+' ended',tries=60,pause=1)
-s.back();s.click('Paper Moons');s.contains('Watch with Ada');wait(lambda:shown('Featurette, Making paper moons'),'the extras')
+s.back();settle();s.click('Paper Moons');s.contains('Watch with Ada');wait(lambda:shown('Featurette, Making paper moons'),'the extras')
 play_to_end('Paper Moons')
 focus_is(lambda d:d=='Featurette, Making paper moons','the extras')
 assert any(r['query'].get('state')==['stopped'] for r in timelines('303')),'The ended movie still reports a stopped timeline'
 s.shot('title-after-end')
 # A title without extras lands on Play.
-s.post('_no_extras');s.back();s.click('Paper Moons');s.contains('Watch with Ada')
+s.post('_no_extras');s.back();settle();s.click('Paper Moons');s.contains('Watch with Ada')
 play_to_end('Paper Moons without extras')
 focus_is(lambda d:d=='Play','Play');assert not shown('Featurette, Making paper moons')
 s.post('_online')
 
 # 6. A show's header: one collection opens directly; Mark watched asks first, then marks the show.
-s.back();s.back();s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.contains('3 of 12 episodes watched')
+s.back();s.back();s.click('Series');s.open_library('Series');settle()
+s.click('Orbit Nine');s.contains('3 of 12 episodes watched')
 # Play trailer arrives with the show's extras and joins the front of the buttons; wait for it, so
 # the buttons stop moving before a tap.
 wait(lambda:'Play trailer' in texts(),"the show's Play trailer")
@@ -134,9 +139,10 @@ marks=requests('/:/unscrobble');assert marks and marks[-1]['query'].get('key')==
 s.shot('title-show-header')
 # Ada's marks are Ada's: Grace still sees the show's own count.
 s.click('Switch profile, Ada');s.click('Grace');s.contains('What are we watching?')
-s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.contains('3 of 12 episodes watched')
+s.click('Series');s.open_library('Series');settle();s.click('Orbit Nine');s.contains('3 of 12 episodes watched')
 s.click('Switch profile, Grace');s.click('Ada');s.contains('What are we watching?')
-s.click('Series');s.open_library('Series');s.click('Orbit Nine');s.contains('Unwatched')
+s.click('Series');s.open_library('Series');settle();s.click('Orbit Nine');s.contains('Unwatched')
+wait(lambda:'Play trailer' in texts(),"the show's Play trailer")
 
 # 7. A season marks only itself.
 s.click('Season 1');s.click('Mark watched');s.contains('Mark the 1 episode of Season 1 for Ada.');s.click('Watched')

@@ -111,8 +111,19 @@ s.back();s.contains('Watch with Ada')
 # episode's subtitle file that just played.
 def sidecars():return len([r for r in fetch('_requests') if r['path']=='/library/streams/9005'])
 s.back();s.back();wait_for(lambda:'Play trailer' in s.text(),'the show with Play trailer')
-before=sidecars();s.click('Play trailer')
-wait_for(lambda:any(n.get('resource-id','').endswith(':id/exo_play_pause') for n in nodes()),'the trailer')
+before=sidecars()
+# The player's picture frame stays on screen after its controls hide.
+def is_playing():return any(n.get('resource-id','').endswith((':id/exo_play_pause',':id/exo_content_frame')) for n in nodes())
+for attempt in range(2):
+    # The emulator now and then loses a tap; tap again only while the show is still on screen.
+    if attempt and (is_playing() or 'Play trailer' not in s.text()):break
+    s.click('Play trailer')
+    for _ in range(40):
+        if is_playing():break
+        time.sleep(.25)
+    if is_playing():break
+if not is_playing():
+    raise AssertionError('Timed out waiting for the trailer\n'+'\n'.join(n.get('content-desc') or n.get('text','') for n in nodes() if n.get('content-desc') or n.get('text')))
 time.sleep(3);assert sidecars()==before,'The trailer loaded the episode subtitle file'
 for _ in range(4):
     if 'Play trailer' in s.text():break

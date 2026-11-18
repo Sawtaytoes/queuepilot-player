@@ -27,7 +27,7 @@ def wait(check,what):
         found=check()
         if found:return found
         time.sleep(.5)
-    raise AssertionError('Timed out waiting for '+what+'\n'+s.text())
+    raise AssertionError('Timed out waiting for '+what+'\n'+'\n'.join(n.get('content-desc') or n.get('text','') for n in s.screen().iter('node') if n.get('content-desc') or n.get('text')))
 
 def png_row(data,y):
     """One decoded row of an 8-bit RGB or RGBA screencap; no imaging library in the lab."""
@@ -77,7 +77,9 @@ def first_row():
 def focus_outline_visible(percent):
     # A tap leaves touch mode on; one D-pad press each way returns to remote focus on a poster.
     s.adb('shell','input','keyevent','22');s.adb('shell','input','keyevent','21');time.sleep(.4)
-    focused=wait(lambda:[n for n in nodes() if n.get('focused')=='true' and n.get('content-desc') in films],'a focused poster')[0]
+    # A library's first screen starts on its Recently Added row, whose cards are posters too.
+    def is_poster(d):return d in films or d.startswith('Recently added, ')
+    focused=wait(lambda:[n for n in nodes() if n.get('focused')=='true' and is_poster(n.get('content-desc',''))],'a focused poster')[0]
     x1,y1,x2,y2=bounds(focused);middle=(y1+y2)//2
     row,bpp=png_row(s.adb('exec-out','screencap','-p'),middle)
     pixel=tuple(row[(x1+1)*bpp:(x1+1)*bpp+3])

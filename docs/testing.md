@@ -65,7 +65,7 @@ blocks the browser remote. It then installs the checkout's APK, starts
 inspector build and install, then `smoke.py`, `native_smoke.py`, `panels_smoke.py`,
 `markers_smoke.py`, `labels_smoke.py`, `display_smoke.py` (density 240 and 320),
 `rail_smoke.py` (240 and 320), `details_smoke.py`, `queue_history_smoke.py`, `household_smoke.py`,
-`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `title_smoke.py`, `playback_smoke.py`, `conversion_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
+`cold_start_smoke.py`, `restyle_smoke.py`, `library_smoke.py`, `title_smoke.py`, `library_views_smoke.py`, `playback_smoke.py`, `conversion_smoke.py`, and `layout_smoke.py` (240 and 320). Whatever the result, the snapshot and the release
 APK are restored afterward. If the environment was stopped, the run starts it and stops it again.
 `QUEUEPILOT_TEST_CONTAINER` names the container when it is not the TrueNAS app default.
 
@@ -421,3 +421,20 @@ and `/:/unscrobble` for the show with Ada's token and updating the facts line; a
 on its own; and an episode's Go to season (looked up from the episode's record, because the
 fixture's listing leaves the season key out) and Go to show. `markers_smoke.py` no longer presses
 Back after the final credits: the title returns to its title screen by itself.
+
+`library_views_smoke.py` follows the title check. The fixture adds **Demos** (section 4), four
+invented test clips in a folder tree (Audio → Surround, and Video), gives the Films their own
+added times, and lists four new episodes, three of them Orbit Nine's. It checks: Films' Recently
+Added row led by its newest film and requested with `type=1&sort=addedAt:desc`; Films left by
+remote through the rail's Watching and opened again, starting on its first Recently Added card,
+not on the rail; the show
+library's row with one card per show and its count, which opens the show, and no row inside a
+show; Demos switched to Folders, with no letter bar, the folder listing requested, two levels of
+folders opened, Back walking up one at a time, the view kept across a restart, and Demos left out
+of All by default; All Movies and Shows with the count of every Titles library, a chip for each
+library, the letter bar jumping to titles of different libraries, D-pad Up from a jumped-to title
+back to Sort (or Search beside it, then Left), the Recently added sort with the fixture's newest
+title first, and
+Search sending one request per included library and finding nothing from Demos; and Demos
+appearing in All once included. It restores Demos to Titles at the end. `library_smoke.py`'s
+sort check now ignores the Recently Added request, which also sorts by `addedAt:desc`.
