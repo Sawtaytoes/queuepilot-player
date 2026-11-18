@@ -228,7 +228,7 @@ final class HomeScreen {
             TvUi.MUTED));
     host.ui.gap(hero, 14);
     TextView resume =
-        host.ui.button("Resume queue", R.drawable.lucide_play, () -> host.startNativeQueue(queue), true);
+        host.ui.button("Resume queue", R.drawable.lucide_play, () -> host.nativeQueuePlayback.startNativeQueue(queue), true);
     resume.setContentDescription(
         "Resume queue. "
             + queue.optString("title")

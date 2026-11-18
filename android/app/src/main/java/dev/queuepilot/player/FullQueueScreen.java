@@ -99,13 +99,13 @@ final class FullQueueScreen {
             host.runOnUiThread(
                 () -> {
                   if (request != host.generation) return;
-                  if (host.askPinIfLocked(error, () -> host.render(host.current))) {
+                  if (host.tvPinPanel.askPinIfLocked(error, () -> host.render(host.current))) {
                     host.status.setText("This queue is locked on the TV. Enter the TV PIN to open it.");
                     host.ui.action(
                         actions,
                         "Enter PIN",
                         R.drawable.lucide_lock,
-                        () -> host.askTvPin(() -> host.render(host.current)),
+                        () -> host.tvPinPanel.askTvPin(() -> host.render(host.current)),
                         true);
                     host.focusFirst(actions.getChildAt(0));
                     return;
@@ -148,7 +148,7 @@ final class FullQueueScreen {
         host.ui.button(
             nextLabel.isEmpty() ? "Play queue" : "Continue · " + nextLabel,
             R.drawable.lucide_play,
-            () -> host.startNativeQueue(queue),
+            () -> host.nativeQueuePlayback.startNativeQueue(queue),
             true);
     play.setContentDescription(
         next == null ? "Play queue" : "Continue. " + QueueDetail.spoken(next));

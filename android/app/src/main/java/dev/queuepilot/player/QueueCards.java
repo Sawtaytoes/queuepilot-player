@@ -137,7 +137,7 @@ final class QueueCards {
             queue.optString("title", "Movies & Shows"),
             queueAudience(queue),
             "Play queue",
-            () -> host.startNativeQueue(queue),
+            () -> host.nativeQueuePlayback.startNativeQueue(queue),
             width);
     if (isLocked) card.setTag("queue-locked");
     // Whom the queue plays as is information only: it never asks anybody to switch profile.

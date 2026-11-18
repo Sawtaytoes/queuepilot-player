@@ -87,7 +87,7 @@ final class HistoryScreen {
                                 ? "1 locked queue is not shown · Enter PIN"
                                 : hidden + " locked queues are not shown · Enter PIN",
                             R.drawable.lucide_lock,
-                            () -> host.askTvPin(() -> host.render(host.current)),
+                            () -> host.tvPinPanel.askTvPin(() -> host.render(host.current)),
                             false);
                     locked.setTag("history-locked");
                     LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
@@ -282,7 +282,7 @@ final class HistoryScreen {
         true,
         () -> {
           holder[0].dismiss();
-          host.startNativeQueue(queue);
+          host.nativeQueuePlayback.startNativeQueue(queue);
         });
     JSONArray items = sitting.optJSONArray("items");
     if ("rules".equals(queue.optString("kind")))

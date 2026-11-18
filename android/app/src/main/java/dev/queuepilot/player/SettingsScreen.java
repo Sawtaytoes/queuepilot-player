@@ -102,7 +102,7 @@ final class SettingsScreen {
     sizeGap.leftMargin = host.dp(12);
     preferences.addView(sizeButton, sizeGap);
     TextView playbackButton =
-        host.ui.button("Playback", R.drawable.lucide_circle_play, () -> host.playbackSettings().show(), false);
+        host.ui.button("Playback", R.drawable.lucide_circle_play, () -> host.playbackMenus.playbackSettings().show(), false);
     playbackButton.setTag("playback-settings");
     LinearLayout.LayoutParams playbackGap = new LinearLayout.LayoutParams(-2, -2);
     playbackGap.leftMargin = host.dp(12);

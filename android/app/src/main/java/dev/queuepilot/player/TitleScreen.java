@@ -99,7 +99,7 @@ final class TitleScreen {
           });
     }
     LinearLayout actions = host.ui.row();
-    TextView play = host.ui.button("Play", R.drawable.lucide_play, () -> host.playEntry(entry), true);
+    TextView play = host.ui.button("Play", R.drawable.lucide_play, () -> host.playbackLauncher.playEntry(entry), true);
     actions.addView(play);
     // An episode is added as its show: a queue holds movies and shows.
     boolean isEpisode = entry.type().equals("episode");

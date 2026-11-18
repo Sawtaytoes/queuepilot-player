@@ -78,7 +78,7 @@ final class QueueItemPanel {
       String server = QueueDetail.text(item, "plexServer");
       if (!server.isEmpty()) start.put("plexServer", server);
       host.fullQueueFocus = ratingKey;
-      host.startNativeQueue(queue, start);
+      host.nativeQueuePlayback.startNativeQueue(queue, start);
     } catch (Exception error) {
       host.message("Queue playback", error.getMessage());
     }
@@ -114,7 +114,7 @@ final class QueueItemPanel {
             host.runOnUiThread(
                 () -> {
                   if (request != host.generation) return;
-                  if (host.askPinIfLocked(
+                  if (host.tvPinPanel.askPinIfLocked(
                       error, () -> markWatched(queue, entryKey, item, isWatched))) return;
                   host.status.setText("The change wasn't saved.");
                   host.message(isWatched ? "Mark watched" : "Mark unwatched", error.getMessage());
