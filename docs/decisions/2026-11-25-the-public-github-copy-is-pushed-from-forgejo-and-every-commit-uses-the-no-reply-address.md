@@ -38,7 +38,7 @@
    The repository allows no other merge style and no update by rebase. A merge commit, a squash, or a rebase that
    Forgejo makes uses the Forgejo account's email, and the publish job would refuse it.
 5. **The job pushes with a deploy key** stored in the `PUBLISH_DEPLOY_KEY` Actions secret. The
-   key can write only this GitHub repository.
+   key can write only this GitHub repository. SSH trusts only GitHub's pinned host key.
 
 ## Context
 
@@ -53,9 +53,8 @@ exists.
 
 ## Why
 
-- **A Forgejo push mirror did not work.** Its SSH mode failed with
-  `No user exists for uid 568`, because the Forgejo server runs as a user ID that has no
-  passwd entry. Its HTTPS mode needs a GitHub token stored in Forgejo. The account's existing
+- **A Forgejo push mirror did not work.** Its SSH mode failed on this server because of how
+  the server's user account is set up. Its HTTPS mode needs a GitHub token stored in Forgejo. The account's existing
   token can write every repository. A fine-grained token can be limited to one repository,
   but only the owner can create one. A deploy key is limited to one repository and needs no
   owner step.

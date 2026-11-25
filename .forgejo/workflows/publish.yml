@@ -1,9 +1,8 @@
 # Publishes main to the public GitHub copy, https://github.com/Sawtaytoes/queuepilot-player.
 # Forgejo stays the working repository: pull requests, CI, reviews, and merges happen here.
 #
-# ⚠️ Why a job and not a Forgejo push mirror: this Forgejo server runs as a user ID with no
-# passwd entry, so its SSH push mirrors fail with "No user exists for uid 568". The HTTPS mode
-# would store a GitHub token in Forgejo. The deploy key in the PUBLISH_DEPLOY_KEY secret can
+# ⚠️ Why a job and not a Forgejo push mirror: this server's SSH push mirrors fail, and the
+# HTTPS mode would store a GitHub token in Forgejo. The deploy key in the PUBLISH_DEPLOY_KEY secret can
 # write only this one GitHub repository.
 #
 # What the job refuses to do
@@ -81,7 +80,9 @@ jobs:
           printf '%s\n' "$DEPLOY_KEY" > "$key_directory/id"
           chmod 600 "$key_directory/id"
           printf '%s\n' "$GITHUB_HOST_KEY" > "$key_directory/known_hosts"
-          export GIT_SSH_COMMAND="ssh -i $key_directory/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$key_directory/known_hosts -o StrictHostKeyChecking=yes"
+          # -F /dev/null and GlobalKnownHostsFile=/dev/null: trust only the pinned key, never a
+          # key from the runner's ssh_config or system known_hosts files.
+          export GIT_SSH_COMMAND="ssh -F /dev/null -i $key_directory/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$key_directory/known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
 
           git fetch --quiet "$GITHUB_REMOTE" +refs/heads/main:refs/remotes/github/main
           if ! git merge-base --is-ancestor refs/remotes/github/main refs/remotes/origin/main; then
