@@ -75,17 +75,18 @@ jobs:
             exit 1
           fi
 
-          # The key goes into an ssh-agent's memory and never into a file, so a cancelled or
-          # killed job leaves no copy on the runner's disk.
-          eval "$(ssh-agent -s)" >/dev/null
-          trap 'ssh-agent -k >/dev/null' EXIT
-          # A pipe, not a here-string: some Bash versions write a here-string to a temporary file.
-          printf '%s\n' "$DEPLOY_KEY" | ssh-add -q -
+          # The key goes into an ssh-agent's memory and never into a file. The agent forgets it
+          # after 10 minutes, the job's timeout, even if a killed job skips the trap.
           known_hosts=$(mktemp)
+          eval "$(ssh-agent -s -t 600)" >/dev/null
+          trap 'ssh-agent -k >/dev/null; rm -- "${known_hosts:?}"' EXIT
+          # A pipe, not a here-string: some Bash versions write a here-string to a temporary file.
+          printf '%s\n' "$DEPLOY_KEY" | ssh-add -q -t 600 -
           printf '%s\n' "$GITHUB_HOST_KEY" > "$known_hosts"
           # -F /dev/null and GlobalKnownHostsFile=/dev/null: trust only the pinned key, never a
-          # key from the runner's ssh_config or system known_hosts files.
-          export GIT_SSH_COMMAND="ssh -F /dev/null -o IdentityAgent=$SSH_AUTH_SOCK -o UserKnownHostsFile=$known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+          # key from the runner's ssh_config or system known_hosts files. IdentityFile=none: sign
+          # in only with the agent's key.
+          export GIT_SSH_COMMAND="ssh -F /dev/null -o IdentityFile=none -o IdentityAgent=$SSH_AUTH_SOCK -o UserKnownHostsFile=$known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
 
           git fetch --quiet "$GITHUB_REMOTE" +refs/heads/main:refs/remotes/github/main
           if ! git merge-base --is-ancestor refs/remotes/github/main refs/remotes/origin/main; then
