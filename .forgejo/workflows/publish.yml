@@ -17,7 +17,9 @@
 #   only commit IDs. A merge commit, squash, or rebase that Forgejo makes uses the Forgejo
 #   account's address, which is why this repository allows fast-forward merges only.
 #
-# It runs only on a push to main, so the workflow that runs is always main's own copy.
+# It runs only on a push to main. Forgejo gives repository secrets to push workflows on any
+# branch, so anyone who can push a branch here could read the key; only the owner and the owner's
+# agents have write access.
 name: Publish to GitHub
 
 on:
@@ -56,13 +58,17 @@ jobs:
 
           # Each line is "<full commit ID> <whole address field>". A commit ID has no space,
           # so everything after the first space is the field, compared as one string.
+          # The scan runs in a plain assignment, so `set -e` stops the job if `git log` fails;
+          # a process substitution would hide that failure and pass an incomplete scan.
           wrong_identity=()
           for field in '%ae' '%ce'; do
+            rows=$(git log --format="%H $field" refs/remotes/origin/main)
+            [ -n "$rows" ] || { echo "git log returned no commits for main." >&2; exit 1; }
             while IFS= read -r line; do
               if [ "${line#* }" != "$PUBLIC_EMAIL" ]; then
                 wrong_identity+=("${line%% *}")
               fi
-            done < <(git log --format="%H $field" refs/remotes/origin/main)
+            done <<< "$rows"
           done
           if [ "${#wrong_identity[@]}" -gt 0 ]; then
             echo "These commits do not use $PUBLIC_EMAIL as author and committer, so nothing was published:" >&2
@@ -83,6 +89,7 @@ jobs:
             exit 1
           fi
 
-          # Without a plus sign, GitHub accepts only a fast-forward.
-          git push --quiet "$GITHUB_REMOTE" refs/remotes/origin/main:refs/heads/main
+          # Without a plus sign, GitHub accepts only a fast-forward. --no-follow-tags overrides a
+          # runner's push.followTags, which would otherwise send reachable annotated tags.
+          git push --quiet --no-follow-tags "$GITHUB_REMOTE" refs/remotes/origin/main:refs/heads/main
           echo "Published main at $(git rev-parse --short refs/remotes/origin/main)."

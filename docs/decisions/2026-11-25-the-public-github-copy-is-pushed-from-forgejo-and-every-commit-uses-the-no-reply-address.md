@@ -60,8 +60,10 @@ exists.
   but only the owner can create one. A deploy key is limited to one repository and needs no
   owner step.
 - **Publishing only `main`** keeps work in progress private until a reviewed change merges.
-  The job runs only on a push to `main`, so the workflow that holds the deploy key is always
-  the reviewed copy on `main`.
+  The key itself is less contained: Forgejo gives repository secrets to push workflows on every
+  branch, so anyone who can push a branch to this repository could write a workflow that reads
+  it. Only the owner and the owner's agents have write access, and the key can write only
+  this one GitHub repository. Removing it from GitHub's deploy keys revokes it.
 - **The address check is in the job, not only in the instructions**, because a fresh clone
   uses whatever identity its machine has. Without the check, a single commit would publish a
   personal address that a later rewrite could not remove from other people's clones.
