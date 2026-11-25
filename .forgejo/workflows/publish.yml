@@ -53,7 +53,9 @@ jobs:
           set -euo pipefail
           # Forgejo exports the secret to every process the step starts. Copy it into a shell
           # variable that is not exported, and remove the exported one before anything runs.
-          # Only ssh-add's standard input receives the key below.
+          # Only ssh-add's standard input receives the key below. Unsetting deploy_key first
+          # drops an export flag it might have inherited; assigning would keep the flag.
+          unset deploy_key
           deploy_key=$DEPLOY_KEY
           unset DEPLOY_KEY
 
