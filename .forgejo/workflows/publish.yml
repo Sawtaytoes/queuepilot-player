@@ -1,0 +1,80 @@
+# Publishes main and the tags to the public GitHub copy,
+# https://github.com/Sawtaytoes/queuepilot-player. Forgejo stays the working repository:
+# pull requests, CI, reviews, and merges happen here.
+#
+# ⚠️ Why a job and not a Forgejo push mirror: this Forgejo server runs as a user ID with no
+# passwd entry, so its SSH push mirrors fail with "No user exists for uid 568". An HTTPS
+# mirror would store a GitHub token that can write every repository of the account. The
+# deploy key in the PUBLISH_DEPLOY_KEY secret can write only this one GitHub repository.
+#
+# The job publishes nothing that GitHub should not have
+# (docs/decisions/2026-11-25-the-public-github-copy-is-pushed-from-forgejo-and-every-commit-uses-the-no-reply-address.md):
+# - only main and the tags, never topic branches or pull request refs;
+# - never a force-push: if GitHub's main is not an ancestor of Forgejo's, the job fails;
+# - every new commit must use the GitHub no-reply address as author and committer, or the
+#   job fails and prints only the commit IDs. A merge commit or a rebase made by Forgejo
+#   uses the Forgejo account's email, which is why this repository allows fast-forward
+#   merges only.
+name: Publish to GitHub
+
+on:
+  push:
+    branches: [main]
+    tags: ['**']
+  workflow_dispatch:
+
+# Pushes run one at a time and in order; a later run includes everything an earlier one had.
+concurrency:
+  group: publish-github
+  cancel-in-progress: false
+
+env:
+  PUBLIC_EMAIL: 3948069+Sawtaytoes@users.noreply.github.com
+  GITHUB_REMOTE: git@github.com:Sawtaytoes/queuepilot-player.git
+  # GitHub's published ed25519 host key, from https://api.github.com/meta (ssh_keys).
+  GITHUB_HOST_KEY: github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: main
+      - name: Check the commits, then push main and the tags
+        env:
+          DEPLOY_KEY: ${{ secrets.PUBLISH_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          command -v ssh >/dev/null || {
+            apt-get update -qq && apt-get install -y -qq openssh-client >/dev/null
+          }
+          key_directory=$(mktemp -d)
+          trap 'rm -r -- "${key_directory:?}"' EXIT
+          printf '%s\n' "$DEPLOY_KEY" > "$key_directory/id"
+          chmod 600 "$key_directory/id"
+          printf '%s\n' "$GITHUB_HOST_KEY" > "$key_directory/known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key_directory/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$key_directory/known_hosts -o StrictHostKeyChecking=yes"
+
+          git fetch --quiet --tags origin
+          git fetch --quiet "$GITHUB_REMOTE" +refs/heads/main:refs/remotes/github/main
+
+          if ! git merge-base --is-ancestor refs/remotes/github/main refs/remotes/origin/main; then
+            echo "GitHub's main is not an ancestor of Forgejo's main. This job never force-pushes." >&2
+            exit 1
+          fi
+
+          # Every commit that GitHub does not have yet, from main and from every tag.
+          wrong_identity=$(git log --format='%h %ae %ce' refs/remotes/origin/main --tags \
+            --not refs/remotes/github/main | awk -v email="$PUBLIC_EMAIL" '$2 != email || $3 != email { print $1 }')
+          if [ -n "$wrong_identity" ]; then
+            echo "These commits do not use $PUBLIC_EMAIL as author and committer, so nothing was published:" >&2
+            printf '%s\n' "$wrong_identity" >&2
+            exit 1
+          fi
+
+          git push --quiet "$GITHUB_REMOTE" refs/remotes/origin/main:refs/heads/main
+          git push --quiet "$GITHUB_REMOTE" 'refs/tags/*:refs/tags/*'
+          echo "Published main at $(git rev-parse --short refs/remotes/origin/main)."

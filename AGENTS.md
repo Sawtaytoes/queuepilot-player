@@ -55,6 +55,14 @@ prove restart/resume and profile isolation. Do not store generated APKs or build
 Git. Register and merge verified PRs, run the workspace personal-detail scanner, and remove
 merged worktrees. Do not install or change an active TV merely to run tests; use the emulator.
 
+This repository is public on GitHub; `.forgejo/workflows/publish.yml` pushes Forgejo's `main`
+and tags there. Commit as `Sawtaytoes <3948069+Sawtaytoes@users.noreply.github.com>` (set
+`user.name` and `user.email` in the checkout before the first commit). Merges are fast-forward
+only: squash and rebase the branch locally on `origin/main`, then merge with the
+`fast-forward-only` style. A merge, squash, or rebase made by Forgejo carries another address,
+and the publish job refuses it
+([decision](docs/decisions/2026-11-25-the-public-github-copy-is-pushed-from-forgejo-and-every-commit-uses-the-no-reply-address.md)).
+
 ## Independent adversarial review
 
 Before integrating any change in this repository, including an authorized direct push

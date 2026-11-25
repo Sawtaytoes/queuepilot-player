@@ -5,5 +5,6 @@ the reasons and evidence for one choice. A later record supersedes an earlier on
 is never rewritten to change its meaning. Product decisions that name the household live in
 the private project notes, not here.
 
+- [2026-11-25 The public GitHub copy is pushed from Forgejo, and every commit uses the no-reply address](2026-11-25-the-public-github-copy-is-pushed-from-forgejo-and-every-commit-uses-the-no-reply-address.md)
 - [2026-11-17 TVs get a release build signed with the key of their debug installs](2026-11-17-tvs-get-a-release-build-signed-with-the-key-of-their-debug-installs.md)
 - [2026-11-17 The TV app moves to Kotlin and Compose for TV screen by screen, and no source file grows past a size limit](2026-11-17-the-tv-app-moves-to-kotlin-and-compose-for-tv-screen-by-screen-and-no-source-file-grows-past-a-size-limit.md)
