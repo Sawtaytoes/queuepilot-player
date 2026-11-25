@@ -344,8 +344,8 @@ release APKs. CI (`.forgejo/workflows/ci.yml`) runs the same steps, without the 
 documentation. `size_check.py` fails any source file over 400 lines unless
 `tools/size-exceptions.txt` lists it with a ceiling it may not pass.
 
-Forgejo is the working repository. After each push to `main` or a tag, `.forgejo/workflows/publish.yml`
-pushes `main` and the tags to the public copy at <https://github.com/Sawtaytoes/queuepilot-player>
+Forgejo is the working repository. After each push to `main`, `.forgejo/workflows/publish.yml`
+pushes `main` to the public copy at <https://github.com/Sawtaytoes/queuepilot-player>
 ([decision](docs/decisions/2026-11-25-the-public-github-copy-is-pushed-from-forgejo-and-every-commit-uses-the-no-reply-address.md)).
 
 TVs get the release APK, `android/app/build/outputs/apk/release/app-release.apk`. R8 shrinks it,

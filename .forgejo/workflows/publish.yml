@@ -1,29 +1,31 @@
-# Publishes main and the tags to the public GitHub copy,
-# https://github.com/Sawtaytoes/queuepilot-player. Forgejo stays the working repository:
-# pull requests, CI, reviews, and merges happen here.
+# Publishes main to the public GitHub copy, https://github.com/Sawtaytoes/queuepilot-player.
+# Forgejo stays the working repository: pull requests, CI, reviews, and merges happen here.
 #
 # ⚠️ Why a job and not a Forgejo push mirror: this Forgejo server runs as a user ID with no
-# passwd entry, so its SSH push mirrors fail with "No user exists for uid 568". An HTTPS
-# mirror would store a GitHub token that can write every repository of the account. The
-# deploy key in the PUBLISH_DEPLOY_KEY secret can write only this one GitHub repository.
+# passwd entry, so its SSH push mirrors fail with "No user exists for uid 568". The HTTPS mode
+# would store a GitHub token in Forgejo. The deploy key in the PUBLISH_DEPLOY_KEY secret can
+# write only this one GitHub repository.
 #
-# The job publishes nothing that GitHub should not have
+# What the job refuses to do
 # (docs/decisions/2026-11-25-the-public-github-copy-is-pushed-from-forgejo-and-every-commit-uses-the-no-reply-address.md):
-# - only main and the tags, never topic branches or pull request refs;
-# - never a force-push: if GitHub's main is not an ancestor of Forgejo's, the job fails;
-# - every new commit must use the GitHub no-reply address as author and committer, or the
-#   job fails and prints only the commit IDs. A merge commit or a rebase made by Forgejo
-#   uses the Forgejo account's email, which is why this repository allows fast-forward
-#   merges only.
+# - publish anything but main: no tags, topic branches, or pull request refs. A tag can name a
+#   commit outside main, and an annotated tag carries its own tagger address, so tags stay on
+#   Forgejo.
+# - force-push: if GitHub's main is not an ancestor of Forgejo's main, the job fails.
+# - publish a commit that does not use the GitHub no-reply address as both author and
+#   committer. It checks every commit on main, compares each whole address field, and prints
+#   only commit IDs. A merge commit, squash, or rebase that Forgejo makes uses the Forgejo
+#   account's address, which is why this repository allows fast-forward merges only.
+#
+# It runs only on a push to main, so the workflow that runs is always main's own copy.
 name: Publish to GitHub
 
 on:
   push:
     branches: [main]
-    tags: ['**']
-  workflow_dispatch:
 
-# Pushes run one at a time and in order; a later run includes everything an earlier one had.
+# One publication at a time. A later run publishes everything an earlier one would have, so a
+# queued run that starts after a newer one simply finds GitHub already current.
 concurrency:
   group: publish-github
   cancel-in-progress: false
@@ -43,7 +45,7 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-      - name: Check the commits, then push main and the tags
+      - name: Check every commit on main, then push main
         env:
           DEPLOY_KEY: ${{ secrets.PUBLISH_DEPLOY_KEY }}
         run: |
@@ -51,6 +53,23 @@ jobs:
           command -v ssh >/dev/null || {
             apt-get update -qq && apt-get install -y -qq openssh-client >/dev/null
           }
+
+          # Each line is "<full commit ID> <whole address field>". A commit ID has no space,
+          # so everything after the first space is the field, compared as one string.
+          wrong_identity=()
+          for field in '%ae' '%ce'; do
+            while IFS= read -r line; do
+              if [ "${line#* }" != "$PUBLIC_EMAIL" ]; then
+                wrong_identity+=("${line%% *}")
+              fi
+            done < <(git log --format="%H $field" refs/remotes/origin/main)
+          done
+          if [ "${#wrong_identity[@]}" -gt 0 ]; then
+            echo "These commits do not use $PUBLIC_EMAIL as author and committer, so nothing was published:" >&2
+            printf '%s\n' "${wrong_identity[@]}" | sort -u >&2
+            exit 1
+          fi
+
           key_directory=$(mktemp -d)
           trap 'rm -r -- "${key_directory:?}"' EXIT
           printf '%s\n' "$DEPLOY_KEY" > "$key_directory/id"
@@ -58,23 +77,12 @@ jobs:
           printf '%s\n' "$GITHUB_HOST_KEY" > "$key_directory/known_hosts"
           export GIT_SSH_COMMAND="ssh -i $key_directory/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$key_directory/known_hosts -o StrictHostKeyChecking=yes"
 
-          git fetch --quiet --tags origin
           git fetch --quiet "$GITHUB_REMOTE" +refs/heads/main:refs/remotes/github/main
-
           if ! git merge-base --is-ancestor refs/remotes/github/main refs/remotes/origin/main; then
             echo "GitHub's main is not an ancestor of Forgejo's main. This job never force-pushes." >&2
             exit 1
           fi
 
-          # Every commit that GitHub does not have yet, from main and from every tag.
-          wrong_identity=$(git log --format='%h %ae %ce' refs/remotes/origin/main --tags \
-            --not refs/remotes/github/main | awk -v email="$PUBLIC_EMAIL" '$2 != email || $3 != email { print $1 }')
-          if [ -n "$wrong_identity" ]; then
-            echo "These commits do not use $PUBLIC_EMAIL as author and committer, so nothing was published:" >&2
-            printf '%s\n' "$wrong_identity" >&2
-            exit 1
-          fi
-
+          # Without a plus sign, GitHub accepts only a fast-forward.
           git push --quiet "$GITHUB_REMOTE" refs/remotes/origin/main:refs/heads/main
-          git push --quiet "$GITHUB_REMOTE" 'refs/tags/*:refs/tags/*'
           echo "Published main at $(git rev-parse --short refs/remotes/origin/main)."
