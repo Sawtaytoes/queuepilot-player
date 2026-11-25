@@ -38,7 +38,8 @@
    The repository allows no other merge style and no update by rebase. A merge commit, a squash, or a rebase that
    Forgejo makes uses the Forgejo account's email, and the publish job would refuse it.
 5. **The job pushes with a deploy key** stored in the `PUBLISH_DEPLOY_KEY` Actions secret. The
-   key can write only this GitHub repository. SSH trusts only GitHub's pinned host key.
+   key can write only this GitHub repository. The job loads it into an `ssh-agent` and never
+   writes it to a file. SSH trusts only GitHub's pinned host key.
 
 ## Context
 

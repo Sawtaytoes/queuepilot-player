@@ -70,19 +70,22 @@ jobs:
             done <<< "$rows"
           done
           if [ "${#wrong_identity[@]}" -gt 0 ]; then
-            echo "These commits do not use $PUBLIC_EMAIL as author and committer, so nothing was published:" >&2
+            echo "These commits do not use the GitHub no-reply address as author and committer, so nothing was published:" >&2
             printf '%s\n' "${wrong_identity[@]}" | sort -u >&2
             exit 1
           fi
 
-          key_directory=$(mktemp -d)
-          trap 'rm -r -- "${key_directory:?}"' EXIT
-          printf '%s\n' "$DEPLOY_KEY" > "$key_directory/id"
-          chmod 600 "$key_directory/id"
-          printf '%s\n' "$GITHUB_HOST_KEY" > "$key_directory/known_hosts"
+          # The key goes into an ssh-agent's memory and never into a file, so a cancelled or
+          # killed job leaves no copy on the runner's disk.
+          eval "$(ssh-agent -s)" >/dev/null
+          trap 'ssh-agent -k >/dev/null' EXIT
+          # A pipe, not a here-string: some Bash versions write a here-string to a temporary file.
+          printf '%s\n' "$DEPLOY_KEY" | ssh-add -q -
+          known_hosts=$(mktemp)
+          printf '%s\n' "$GITHUB_HOST_KEY" > "$known_hosts"
           # -F /dev/null and GlobalKnownHostsFile=/dev/null: trust only the pinned key, never a
           # key from the runner's ssh_config or system known_hosts files.
-          export GIT_SSH_COMMAND="ssh -F /dev/null -i $key_directory/id -o IdentitiesOnly=yes -o UserKnownHostsFile=$key_directory/known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
+          export GIT_SSH_COMMAND="ssh -F /dev/null -o IdentityAgent=$SSH_AUTH_SOCK -o UserKnownHostsFile=$known_hosts -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes"
 
           git fetch --quiet "$GITHUB_REMOTE" +refs/heads/main:refs/remotes/github/main
           if ! git merge-base --is-ancestor refs/remotes/github/main refs/remotes/origin/main; then
